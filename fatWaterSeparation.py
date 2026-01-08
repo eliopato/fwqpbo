@@ -90,12 +90,12 @@ def ICM(prev, L, maxICMUpdate, nICMiter, J, V, wx, wy, wz):
 
 
 # Find all local minima of discretely evaluated function f(t) with period T
-def findMinima(f): return np.where((f < np.roll(f, 1))*(f < np.roll(f, -1)))[0]
+def findMinima(f): 
+    return np.where((f < np.roll(f, 1))*(f < np.roll(f, -1)))[0]
 
 
 # In each voxel, find two smallest local residual minima in a period of omega
 def findTwoSmallestMinima(J):
-    nVxl = J.shape[1] * J.shape[2] * J.shape[3]
     A = np.zeros(J.shape[1:], dtype=int)
     B = np.zeros(J.shape[1:], dtype=int)
     for z in range(J.shape[1]):
@@ -113,21 +113,24 @@ def findTwoSmallestMinima(J):
 
 # 2D measure of isotropy defined as
 # the square area over the square perimeter (area normalized to 1)
-def isotropy2D(dx, dy): return np.sqrt(dx*dy)/(2*(dx+dy))
+def isotropy2D(dx, dy): 
+    return np.sqrt(dx*dy)/(2*(dx+dy))
 
 
 # 3D measure of isotropy defined as
 # the cube volume over the cube area (volume normalized to 1)
-def isotropy3D(dx, dy, dz): return (dx*dy*dz)**(2/3)/(2*(dx*dy+dx*dz+dy*dz))
+def isotropy3D(dx, dy, dz): 
+    return (dx*dy*dz)**(2/3)/(2*(dx*dy+dx*dz+dy*dz))
 
 
-def getHigherLevel(level):
+def getHigherLevel(level: dict):
     high = {'L': level['L']+1}
     # Isotropy promoting downsampling
     maxIsotropy = 0
     for sx in [1, 2]:
         for sy in [1, 2]:
-            for sz in [1, 2]:  # Loop over all 2^3=8 downscaling combinations
+            # Loop over all 2^3=8 downscaling combinations
+            for sz in [1, 2]:  
                 # at least one dimension must change and the size of all
                 # dimensions at lower level must permit any downscaling
                 if (sx*sy*sz > 1 and level['nx'] >= sx and
@@ -156,7 +159,7 @@ def getHigherLevel(level):
     return high
 
 
-def getHighLevelResidualImage(J, high, level):
+def getHighLevelResidualImage(J, high, level: dict):
     Jhigh = np.zeros((J.shape[0], level['nz']+level['nz'] % high['sz'],
                                   level['ny']+level['ny'] % high['sy'],
                                   level['nx']+level['nx'] % high['sx']))
@@ -164,11 +167,11 @@ def getHighLevelResidualImage(J, high, level):
     return Jhigh.reshape((J.shape[0], high['nz'], high['sz'], high['ny'], high['sy'], high['nx'], high['sx'])).mean(axis=(2,4,6))
 
 
-def getB0fromHighLevel(dB0high, level, high):
+def getB0fromHighLevel(dB0high, level: dict, high):
     return np.repeat(np.repeat(np.repeat(dB0high, high['sx'], axis=2), high['sy'], axis=1), high['sz'], axis=0)[:level['nz'], :level['ny'], :level['nx']]
 
 
-def calculateFieldMap(nB0, level, graphcutLevel, multiScale, maxICMupdate,
+def calculateFieldMap(nB0, level: dict, graphcutLevel, multiScale, maxICMupdate,
                       nICMiter, J, V, mu, offresPenalty=0, offresCenter=0):
     A, B = findTwoSmallestMinima(J)
     dB0 = np.array(A)
@@ -195,8 +198,7 @@ def calculateFieldMap(nB0, level, graphcutLevel, multiScale, maxICMupdate,
     # Prepare discontinuity costs
     
     # 2nd derivative of residual function
-    # NOTE: No division by square(steplength) since
-    # square(steplength) not included in V    
+    # NOTE: No division by square(steplength) since square(steplength) not included in V    
     J.shape = (J.shape[0], np.prod(J.shape[1:]))
     vxls = range(J.shape[1])
     ddJ = (J[(A.flatten()+1) % nB0, vxls]+J[(A.flatten()-1) % nB0, vxls]-2*J[A.flatten(), vxls]).reshape(A.shape)
@@ -330,8 +332,6 @@ def getMeanEnergy(Y):
 def reconstruct(dPar, aPar, mPar, B0map=None, R2map=None):
     determineB0 = aPar['graphcutLevel'] is not None or aPar['nICMiter'] > 0
     determineR2 = (aPar['nR2'] > 1) and (R2map is None)
-
-    nVxl = dPar['nx']*dPar['ny']*dPar['nz']
 
     Y = dPar['img']
 

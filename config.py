@@ -236,7 +236,7 @@ def setupDataParams(dPar, outDir=None):
         for path in dPar['dirs']:
             dPar['files'] += [obj for obj in path.iterdir() if obj.is_file()]
     
-    validFiles = DICOM.getValidFiles(dPar['files'])
+    validFiles = DICOM.getValidFiles(dPar['files'], True)
     
     if validFiles:
         DICOM.updateDataParams(dPar, validFiles)
