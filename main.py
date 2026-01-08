@@ -126,29 +126,26 @@ def reconstruct(dPar, aPar, mPar):
 
 def main(dataParamFile, algoParamFile, modelParamFile, outDir=None):
     # Read configuration files
-    dPar = config.readConfig(dataParamFile, 'data parameters')
-    aPar = config.readConfig(algoParamFile, 'algorithm parameters')
-    mPar = config.readConfig(modelParamFile, 'model parameters')
+    dPar = config.readConfig(dataParamFile)
+    aPar = config.readConfig(algoParamFile)
+    mPar = config.readConfig(modelParamFile)
 
     # Setup configuration objects
     config.setupDataParams(dPar, outDir)
     config.setupModelParams(mPar, dPar['clockwisePrecession'], dPar['temperature'])
     config.setupAlgoParams(aPar, dPar['N'], mPar['nFAC'])
 
-    print('B0 = {}'.format(round(dPar['B0'], 2)))
-    print('N = {}'.format(dPar['N']))
-    print('t1/dt = {}/{} msec'.format(round(dPar['t1']*1000, 2),
-                                      round(dPar['dt']*1000, 2)))
-    print('nx,ny,nz = {},{},{}'.format(dPar['nx'], dPar['ny'], dPar['nz']))
-    print('dx,dy,dz = {},{},{}'.format(
-        round(dPar['dx'], 2), round(dPar['dy'], 2), round(dPar['dz'], 2)))
+    print(f'B0 = {round(dPar["B0"], 2)}')
+    print(f'N = {dPar["N"]}')
+    print(f't1/dt = {round(dPar["t1"]*1000, 2)}/{round(dPar["dt"]*1000, 2)} msec')
+    print(f'nx,ny,nz = {dPar["nx"]},{dPar["ny"]},{dPar["nz"]}')
+    print(f'dx,dy,dz = {round(dPar["dx"], 2)},{round(dPar["dy"], 2)},{round(dPar["dz"], 2)}')
 
     # Run fat/water processing and save output
     if aPar['use3D'] or len(dPar['sliceList']) == 1:
         if 'slabs' in dPar:
             for iSlab, (slices, z) in enumerate(dPar['slabs']):
-                print('Processing slab {}/{} (slices {}-{})...'
-                      .format(iSlab+1, len(dPar['slabs']), slices[0]+1, slices[-1]+1))
+                print(f'Processing slab {iSlab+1}/{len(dPar['slabs'])} (slices {slices[0]+1}-{slices[-1]+1})...')
                 slabDataParams = config.getSlabDataParams(dPar, slices, z)
                 output = reconstruct(slabDataParams, aPar, mPar)
                 save(output, slabDataParams) # save data slab-wise to save memory

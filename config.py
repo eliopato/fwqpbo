@@ -236,7 +236,7 @@ def setupDataParams(dPar, outDir=None):
         for path in dPar['dirs']:
             dPar['files'] += [obj for obj in path.iterdir() if obj.is_file()]
     
-    validFiles = DICOM.getValidFiles(dPar['files'], True)
+    validFiles = DICOM.getValidFiles(dPar['files'])
     
     if validFiles:
         DICOM.updateDataParams(dPar, validFiles)
@@ -251,12 +251,12 @@ def setupDataParams(dPar, outDir=None):
 
 
 # Read configuration file
-def readConfig(file, section):
+def readConfig(file):
     file = Path(file)
     with open(file, 'r') as configFile:
         try:
             config = yaml.safe_load(configFile)
         except yaml.YAMLError as exc:
-            raise Exception('Error reading config file {}'.format(file)) from exc
+            raise Exception(f'Error reading config file {file}') from exc
     config['configPath'] = file.parent
     return config

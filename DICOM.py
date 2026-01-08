@@ -5,6 +5,13 @@ import numpy as np
 
 gyro = 42.58  # 1H gyromagnetic ratio
 
+# from https://github.com/rordenlab/dcm2niix/blob/master/Philips/README.md
+#  WS = RealWorldValue slope (0040,9225) "PhilipsRWVSlope"
+#  WI = RealWorldValue intercept (0040,9224) "PhilipsRWVIntercept"
+#  RS = rescale slope (0028,1053) "PhilipsRescaleSlope"
+#  RI = rescale intercept (0028,1052) "PhilipsRescaleIntercept"
+#  SS = scale slope (2005,100E) "PhilipsScaleSlope"
+
 
 # Dictionary of DICOM tags
 tagDict = {
@@ -35,20 +42,19 @@ tagDict = {
     'Number of frames': 0x00280008,
     'Frame sequence': 0x52009230}  # Per-frame Functional Groups Sequence
 
-
 # DICOM tags for output from fat/water separation
 imgTypes = {
     'phi': {'descr': 'Initial phase (degrees)', 'seriesNumber': 100},
     'wat': {'descr': 'Water-only', 'seriesNumber': 101},
     'fat': {'descr': 'Fat-only', 'seriesNumber': 102},
     'ip': {'descr': 'In-phase', 'seriesNumber': 103},
-    'op': {'descr': 'Opposed-phase', 'seriesNumber': 104},
-    'ff': {'descr': 'Fat Fraction (%)', 'seriesNumber': 105, 'reScaleIntercept': -100, 'reScaleSlope': 0.1},
+    'op': {'descr': 'Opposed-phase', 'seriesNumber': 104},    
+    'ff': {'descr': 'Fat Fraction (%)', 'seriesNumber': 105, 'RescaleIntercept': -100, 'RescaleSlope': 0.1},
     'R2map': {'descr': 'R2* (msec-1)', 'seriesNumber': 106},
-    'B0map': {'descr': 'B0 inhomogeneity (ppm)', 'seriesNumber': 107, 'reScaleSlope': 0.001},
-    'CL': {'descr': 'FAC Chain length', 'seriesNumber': 108, 'reScaleSlope': 0.01},
-    'UD': {'descr': 'FAC Unsaturation degree', 'seriesNumber': 109, 'reScaleSlope': 0.01},
-    'PUD': {'descr': 'FAC Polyunsaturation degree', 'seriesNumber': 110, 'reScaleSlope': 0.01}
+    'B0map': {'descr': 'B0 inhomogeneity (ppm)', 'seriesNumber': 107, 'RescaleSlope': 0.001},
+    'CL': {'descr': 'FAC Chain length', 'seriesNumber': 108, 'RescaleSlope': 0.01},
+    'UD': {'descr': 'FAC Unsaturation degree', 'seriesNumber': 109, 'RescaleSlope': 0.01},
+    'PUD': {'descr': 'FAC Polyunsaturation degree', 'seriesNumber': 110, 'RescaleSlope': 0.01}
 }
 
 
@@ -81,8 +87,9 @@ def typeTag2type(tagValue):
 
 # Retrieves DICOM element value from dataset ds at tag=key.
 # Use frame for multiframe DICOM files
-def getTagValue(ds, key, frame=None):
+def getTagValue(ds: pydicom.Dataset, key: str, frame=None):
     # Philips(?) private tag containing frame tags
+    # 0x2005140f = Image Patient Position
     if (frame is not None and
        0x2005140f in ds[tagDict['Frame sequence']].value[frame]):
         frameObject = ds[tagDict['Frame sequence']].value[frame][0x2005140f][0]
@@ -95,20 +102,27 @@ def getTagValue(ds, key, frame=None):
 
 # Retrieve attribute from dataset ds. Use frame for multiframe DICOM files.
 # Must attributes are read directly from their corresponding DICOM tag
-def getAttribute(ds, attr, frame=None):
-    attribute = getTagValue(ds, attr, frame)
-    if attr == 'Slice Location' and attribute is None:
-        attribute = getTagValue(ds, 'Image Position (Patient)', frame)
-        if attribute:
-            attribute = attribute[2]
-    elif attr == 'Spacing Between Slices' and attribute is None:
-        attribute = getTagValue(ds, 'Slice Thickness', frame)
-    elif attr == 'Image Type' and attribute:  # special handling of image type
-        attribute = typeTag2type(attribute)
-        if not attribute:
-            attribute = seriesDescription2type(
-                getTagValue(ds, 'Series Description', frame))
-    return attribute
+def getAttribute(ds: pydicom.Dataset, attr: str, frame=None):
+
+    value = getTagValue(ds, attr, frame)
+
+    if value is None:
+
+        if attr == 'Slice Location':
+
+            value = getTagValue(ds, 'Image Position Patient', frame)
+            if value:
+                value = value[2]
+
+        elif attr == 'Spacing Between Slices':
+            value = getTagValue(ds, 'Slice Thickness', frame)
+
+    elif attr == 'Image Type':  # special handling of image type
+        value = typeTag2type(value)
+        if value is None:
+            value = seriesDescription2type(getTagValue(ds, 'Series Description', frame))
+            
+    return value
 
 
 # Check if attribute is in DICOM dataset ds
@@ -131,24 +145,23 @@ def isMultiFrame(ds):
 
 
 # Extract files that are readable and have all required DICOM tags
-def getValidFiles(files, printOutput=False):
+def getValidFiles(files):
     validFiles = []
     for file in files:
         try:
             ds = pydicom.read_file(str(file), stop_before_pixels=True)
         except:
-            if printOutput:
-                print('Could not read file: {}'.format(file))
+            print(f'Could not read file: {file}')
             continue
+
         multiframe = isMultiFrame(ds)
-        hasRequiredAttrs = [AttrInDataset(ds, attr, multiframe)
-                            for attr in reqAttributes]
+
+        hasRequiredAttrs = [AttrInDataset(ds, attr, multiframe) for attr in reqAttributes]
         if not all(hasRequiredAttrs):
-            if printOutput:
-                print('File {} is missing required DICOM tags:'.format(file))
-                for i, hasAttr in enumerate(hasRequiredAttrs):
-                    if not hasAttr:
-                        print(reqAttributes[i])
+            print(f'File {file} is missing required DICOM tags:')
+            for i, hasAttr in enumerate(hasRequiredAttrs):
+                if not hasAttr:
+                    print(reqAttributes[i])
             continue
         else:
             validFiles.append(file)
@@ -157,31 +170,36 @@ def getValidFiles(files, printOutput=False):
 
 # get combination of image types for DICOM frames in frameList
 def getType(frameList, printType=False):
+
     typeTags = [tags[2] for tags in frameList]
+    
     numR = typeTags.count('R')
     numI = typeTags.count('I')
     numM = typeTags.count('M')
     numP = typeTags.count('P')
-    if numM+numP == 0 and numR+numI > 0 and numR == numI:
+
+    if numM + numP == 0 and numR+numI > 0 and numR == numI:
         if printType:
             print('Real/Imaginary images')
         return 'RI'
-    elif numM+numP > 0 and numR+numI == 0 and numM == numP:
+    
+    elif numM + numP > 0 and numR+numI == 0 and numM == numP:
         if printType:
             print('Magnitude/Phase images')
         return 'MP'
+    
     elif numP == 0 and numM+numR+numI > 0 and numM == numR == numI:
         if printType:
             print('Magnitude/Real/Imaginary images')
         return 'MRI'
-    elif numM+numP+numR+numI > 0 and numM == numP == numR == numI:
+    
+    elif numM + numP + numR + numI > 0 and numM == numP == numR == numI:
         if printType:
             print('Magnitude/Phase/Real/Imaginary images')
         return 'MPRI'
+    
     else:
-        raise Exception('Unknown combination of image types: ' +
-                        '{} real, {} imag, {} magn, {} phase'
-                        .format(numR, numI, numM, numP))
+        raise Exception(f'Unknown combination of image types: {numR} real, {numI} imag, {numM} magn, {numP} phase')
 
 
 def getSOPInstanceUID():
@@ -210,14 +228,12 @@ def updateDataParams(dPar, files):
         multiframe = isMultiFrame(ds)
         if multiframe:
             if len(files) > 1:
-                raise Exception('Support for multiple multi-frame DICOM' +
-                                'files not implemented yet!')
+                raise Exception('Support for multiple multi-frame DICOM files not implemented yet!')
             for frame in range(len(ds[tagDict['Frame sequence']].value)):
                 frameList.append([file]+[frame]+[getAttribute(ds, attr, frame)
                                  for attr in reqAttributes])
         else:  # Single frame DICOM files
-            frameList.append([file]+[None]+[getAttribute(ds, attr)
-                             for attr in reqAttributes])
+            frameList.append([file]+[None]+[getAttribute(ds, attr) for attr in reqAttributes])
     frameList.sort(key=lambda tags: tags[2])  # First, sort on type (M/P/R/I)
     frameList.sort(key=lambda tags: tags[3])  # Second, sort on echo time
     frameList.sort(key=lambda tags: tags[4])  # Third, sort on slice location
@@ -231,19 +247,21 @@ def updateDataParams(dPar, files):
     # [msec]->[sec]
     echoTimes = sorted(set([float(tags[3])/1000. for tags in frameList]))
     dPar['totalN'] = len(echoTimes)
+
     if 'echoes' not in dPar:
         dPar['echoes'] = range(dPar['totalN'])
     echoTimes = [echoTimes[echo] for echo in dPar['echoes']]
+
     dPar['N'] = len(dPar['echoes'])
     if dPar['N'] < 2:
-        raise Exception('At least 2 echoes required, only {} given'
-                        .format(dPar['N']))
+        raise Exception(f'At least 2 echoes required, only {dPar["N"]} given')
+    
     dPar['t1'] = echoTimes[0]
     dPar['dt'] = np.mean(np.diff(echoTimes))
-    if np.max(np.diff(echoTimes))/dPar['dt'] > 1.05 or \
-       np.min(np.diff(echoTimes))/dPar['dt'] < .95:
+    if np.max(np.diff(echoTimes))/dPar['dt'] > 1.05 or np.min(np.diff(echoTimes))/dPar['dt'] < .95:
         print('Warning: echo inter-spacing varies more than 5%')
         print(echoTimes)
+
     nSlices = len(set([tags[4] for tags in frameList]))
     if 'sliceList' not in dPar:
         dPar['sliceList'] = range(nSlices)
@@ -266,19 +284,15 @@ def updateDataParams(dPar, files):
         dcm = pydicom.read_file(str(file))
     for n in dPar['echoes']:
         for slice in dPar['sliceList']:
-            i = (dPar['N']*slice+n)*len(type)
+            i = (dPar['N'] * slice + n) * len(type)
             if type == 'MP':  # Magnitude/phase images
                 magnFrame = i
-                phaseFrame = i+1
+                phaseFrame = i + 1
                 if multiframe:
-                    magn = dcm.pixel_array[
-                        frameList[magnFrame][1]][y1:y2, x1:x2].flatten()
-                    phase = dcm.pixel_array[
-                        frameList[phaseFrame][1]][y1:y2, x1:x2].flatten()
+                    magn = dcm.pixel_array[frameList[magnFrame][1]][y1:y2, x1:x2].flatten()
+                    phase = dcm.pixel_array[frameList[phaseFrame][1]][y1:y2, x1:x2].flatten()
                     # Abs val needed for Siemens data to get correct phase sign
-                    reScaleIntercept = \
-                        np.abs(getAttribute(dcm, 'Rescale Intercept',
-                                            frameList[phaseFrame][1]))
+                    rescaleIntercept = np.abs(getAttribute(dcm, 'Rescale Intercept', frameList[phaseFrame][1]))
                 else:
                     magnFile = frameList[magnFrame][0]
                     phaseFile = frameList[phaseFrame][0]
@@ -288,32 +302,27 @@ def updateDataParams(dPar, files):
                     phase = pDcm.pixel_array[y1:y2, x1:x2].flatten()
                     # Abs val needed for Siemens data to get correct phase sign
                     try:
-                        reScaleIntercept = np.abs(
-                            getAttribute(pDcm, 'Rescale Intercept'))
+                        rescaleIntercept = np.abs(getAttribute(pDcm, 'Rescale Intercept'))
                     except:
                         print('No Rescale Intercept DICOM tag found. Using 4096.')
-                        reScaleIntercept = 4096
+                        rescaleIntercept = 4096
                 # For some reason, intercept is used as slope (Siemens only?)
-                c = magn*np.exp(phase/float(reScaleIntercept)*2*np.pi*1j)
+                c = magn*np.exp(phase/float(rescaleIntercept)*2*np.pi*1j)
             # Real/imaginary images and Magnitude/real/imaginary images
             elif type in ['RI', 'MRI', 'MPRI']:
                 if type == 'RI':
-                    realFrame = i+1
+                    realFrame = i + 1
                 elif type == 'MRI':
-                    realFrame = i+2
+                    realFrame = i + 2
                 elif type == 'MPRI':
-                    realFrame = i+3
+                    realFrame = i + 3
                 imagFrame = i
                 if multiframe:
-                    realPart = dcm.pixel_array[
-                        frameList[realFrame][1]][y1:y2, x1:x2].flatten()
-                    imagPart = dcm.pixel_array[
-                        frameList[imagFrame][1]][y1:y2, x1:x2].flatten()
+                    realPart = dcm.pixel_array[frameList[realFrame][1]][y1:y2, x1:x2].flatten()
+                    imagPart = dcm.pixel_array[frameList[imagFrame][1]][y1:y2, x1:x2].flatten()
                     # Assumes real and imaginary slope/intercept are equal
-                    reScaleIntercept = getAttribute(
-                        dcm, 'Rescale Intercept', frameList[realFrame][1])
-                    reScaleSlope = getAttribute(
-                        dcm, 'Rescale Slope', frameList[realFrame][1])
+                    rescaleIntercept = getAttribute(dcm, 'Rescale Intercept', frameList[realFrame][1])
+                    rescaleSlope = getAttribute(dcm, 'Rescale Slope', frameList[realFrame][1])
                 else:
                     realFile = frameList[realFrame][0]
                     imagFile = frameList[imagFrame][0]
@@ -322,18 +331,20 @@ def updateDataParams(dPar, files):
                     realPart = rDcm.pixel_array[y1:y2, x1:x2].flatten()
                     imagPart = iDcm.pixel_array[y1:y2, x1:x2].flatten()
                     # Assumes real and imaginary slope/intercept are equal
-                    reScaleIntercept = getAttribute(rDcm, 'Rescale Intercept')
-                    reScaleSlope = getAttribute(rDcm, 'Rescale Slope')
-                if reScaleIntercept and reScaleSlope:
-                    offset = reScaleIntercept/reScaleSlope
+                    rescaleIntercept = getAttribute(rDcm, 'Rescale Intercept')
+                    rescaleSlope = getAttribute(rDcm, 'Rescale Slope')
+                if rescaleIntercept and rescaleSlope:
+                    offset = rescaleIntercept/rescaleSlope
                 else:
                     offset = -2047.5
-                c = (realPart+offset)+1.0*1j*(imagPart+offset)
+                c = (realPart + offset) + 1.0 * 1j * (imagPart + offset)
             else:
                 raise Exception('Unknown image types')
             img.append(c)
     dPar['frameList'] = frameList
-    dPar['img'] = np.array(img, shape=(dPar['N'], dPar['nz'], dPar['ny'], dPar['nx'])) * dPar['reScale']
+    img = np.array(img) * dPar['reScale']
+    img = np.reshape(img, shape=(dPar['N'], dPar['nz'], dPar['ny'], dPar['nx']))
+    dPar['img'] = img
 
 
 # Set window so that percentile % of pixels are inside
@@ -347,7 +358,8 @@ def getPercentileWindow(im, intercept, slope, percentile=95):
 # Sets DICOM element value in dataset ds at tag=key. Use frame for multiframe
 # DICOM files. If missing tag, a new one is created if value representation VR
 # is provided
-def setTagValue(ds, key, val, frame=None, VR=None):
+def setTagValue(ds: pydicom.Dataset, key: str, val, frame=None, VR=None):
+
     # Philips(?) private tag containing frame tags
     if (frame is not None and
        0x2005140f in ds[tagDict['Frame sequence']].value[frame]):
@@ -355,57 +367,64 @@ def setTagValue(ds, key, val, frame=None, VR=None):
         if tagDict[key] in frameObject:
             frameObject[tagDict[key]].value = val
             return True
+        
     if tagDict[key] in ds:
         ds[tagDict[key]].value = val
         return True
+    
     # Else, add as new DICOM element:
     if VR:
         # Philips(?) private tag containing frame tags
         if (frame is not None and
            0x2005140f in ds[tagDict['Frame sequence']].value[frame]):
-            frameObject = ds[tagDict['Frame sequence']].\
-                value[frame][0x2005140f][0]
+            frameObject = ds[tagDict['Frame sequence']].value[frame][0x2005140f][0]
             frameObject.add_new(tagDict[key], VR, val)
             return True
-        ds.add_new(tagDict[key], VR, val)
-        return True
-    # print('Warning: DICOM tag {} was not set'.format(key))
+        else:
+            ds.add_new(key, VR, val)
+            return True
+    
+    print(f'Warning: DICOM tag {key} was not set')
     return False
 
 
 # Save numpy array to DICOM image.
 # Based on input DICOM image if exists, else create from scratch
-def saveSeries(outDir, imgType, img, dPar):
+def saveSeries(outDir: str, imgType:str, img: np.array, dPar: dict):
+    print('> Saving DICOM series')
+    print(outDir)
+    print(imgType)
+    print(type(img))
+
     seriesDescription = imgTypes[imgType]['descr']
     seriesNumber = imgTypes[imgType]['seriesNumber']
-    if 'reScaleIntercept' in imgTypes[imgType]:
-        reScaleIntercept = imgTypes[imgType]['reScaleIntercept']
+    if 'Rescale Intercept' in imgTypes[imgType]:
+        rescaleIntercept = imgTypes[imgType]['Rescale Intercept']
     else:
-        reScaleIntercept = 0.
-    if 'reScaleSlope' in imgTypes[imgType]:
-        reScaleSlope = imgTypes[imgType]['reScaleSlope']
+        rescaleIntercept = 0.
+    if 'Rescale Slope' in imgTypes[imgType]:
+        rescaleSlope = imgTypes[imgType]['Rescale Slope']
     else:
-        reScaleSlope = 1.
+        rescaleSlope = 1.
     
     seriesInstanceUID = getSeriesInstanceUID(dPar, seriesDescription)
     # Single file is interpreted as multi-frame
-    multiframe = dPar['frameList'] and \
-        len(set([frame[0] for frame in dPar['frameList']])) == 1
+    multiframe = dPar['frameList'] and len(set([frame[0] for frame in dPar['frameList']])) == 1
     if multiframe:
         ds = pydicom.read_file(str(dPar['frameList'][0][0]))
         imVol = np.empty([dPar['nz'], dPar['ny']*dPar['nx']], dtype='uint16')
         frames = []
     if dPar['frameList']:
         DICOMimgType = getType(dPar['frameList'])
+        
     for z, slice in enumerate(dPar['sliceList']):
+        
         filename = outDir / './{}.dcm'.format(slice)
         # Extract slice, scale and type cast pixel data
-        pixelData = np.array([max(0, (val-reScaleIntercept)/reScaleSlope)
-                      for val in img[:, :, z].flatten()])
+        pixelData = np.array([max(0, (val-rescaleIntercept)/rescaleSlope) for val in img[:, :, z].flatten()])
         pixelData = pixelData.astype('uint16')
         # Set window so that 95% of pixels are inside
-        windowCenter, windowWidth = getPercentileWindow(
-                                            pixelData, reScaleIntercept, reScaleSlope, 95)
+        windowCenter, windowWidth = getPercentileWindow(pixelData, rescaleIntercept, rescaleSlope, 95)
         if dPar['frameList']:
             # Get frame
             frame = dPar['frameList'][dPar['totalN']*slice*len(DICOMimgType)]
@@ -414,17 +433,12 @@ def saveSeries(outDir, imgType, img, dPar):
                 ds = pydicom.read_file(str(frame[0]))
         else:
             iFrame = None
-            # Create new DICOM images from scratch
             file_meta = pydicom.dataset.Dataset()
-            file_meta.MediaStorageSOPClassUID = \
-                'Secondary Capture Image Storage'
-            file_meta.MediaStorageSOPInstanceUID = '1.3.6.1.4.1.9590.100.' +\
-                '1.1.111165684411017669021768385720736873780'
-            file_meta.ImplementationClassUID = '1.3.6.1.4.1.9590.100.' + \
-                '1.0.100.4.0'
+            file_meta.MediaStorageSOPClassUID = 'Secondary Capture Image Storage'
+            file_meta.MediaStorageSOPInstanceUID = '1.3.6.1.4.1.9590.100.' + '1.1.111165684411017669021768385720736873780'
+            file_meta.ImplementationClassUID = '1.3.6.1.4.1.9590.100.' + '1.0.100.4.0'
             file_meta.TransferSyntaxUID = pydicom.uid.ImplicitVRLittleEndian
-            ds = pydicom.dataset.FileDataset(filename, {}, file_meta=file_meta,
-                                           preamble=b"\0"*128)
+            ds = pydicom.dataset.FileDataset(filename, {}, file_meta=file_meta, preamble=b"\0"*128)
             # Add DICOM tags:
             ds.Modality = 'WSD'
             ds.ContentDate = str(datetime.date.today()).replace('-', '')
@@ -439,37 +453,37 @@ def saveSeries(outDir, imgType, img, dPar):
             ds.LargestImagePixelValue = '\\xff\\xff'
             ds.Columns = img.shape[1]
             ds.Rows = img.shape[0]
-            setTagValue(ds, 'Study Instance UID',
-                        getSOPInstanceUID(), iFrame, 'UI')
-            setTagValue(ds, 'Pixel Spacing', [dPar['dx'], dPar['dy']], iFrame, 'DS')
-            setTagValue(ds, 'Pixel Aspect Ratio', [int(dPar['dx']*100), int(dPar['dy']*100)], iFrame, 'IS')
+            setTagValue(ds, 'Study Instance UID', getSOPInstanceUID(), iFrame, 'UI')
+            setTagValue(ds, 'Pixel Spacing', str([dPar['dx'], dPar['dy']]), iFrame, 'DS')
+            setTagValue(ds, 'Pixel Aspect Ratio', str([int(dPar['dx']*100), int(dPar['dy']*100)]), iFrame, 'IS')
+
         # Change/add DICOM tags:
-        setTagValue(ds, 'SOP Instance UID', getSOPInstanceUID(), iFrame, 'UI')
-        setTagValue(ds, 'Series Instance UID', seriesInstanceUID, iFrame, 'UI')
-        setTagValue(ds, 'Series Number', seriesNumber, iFrame, 'IS')
-        setTagValue(ds, 'Echo Time', 0., iFrame, 'DS')
-        setTagValue(ds, 'Protocol Name', 'Derived Image', iFrame, 'LO')
-        setTagValue(ds, 'Series Description', seriesDescription, iFrame, 'LO')
-        setTagValue(ds, 'Smallest Pixel Value', np.min(pixelData), iFrame)
-        setTagValue(ds, 'Largest Pixel Value', np.max(pixelData), iFrame)
-        setTagValue(ds, 'Window Center', int(windowCenter), iFrame, 'DS')
-        setTagValue(ds, 'Window Width', int(windowWidth), iFrame, 'DS')
-        setTagValue(ds, 'Rescale Intercept', reScaleIntercept, iFrame, 'DS')
-        setTagValue(ds, 'Rescale Slope', reScaleSlope, iFrame, 'DS')
+        setTagValue(ds, 'SOP Instance UID', getSOPInstanceUID(), iFrame, 'UI')  # ok
+        setTagValue(ds, 'Series Instance UID', seriesInstanceUID, iFrame, 'UI') # ok
+        setTagValue(ds, 'Protocol Name', 'Derived Image', iFrame, 'LO') # ok
+        setTagValue(ds, 'Series Description', seriesDescription, iFrame, 'LO') # ok
+        setTagValue(ds, 'Smallest Pixel Value', np.min(pixelData), iFrame) # ok
+        setTagValue(ds, 'Largest Pixel Value', np.max(pixelData), iFrame) # ok
+        setTagValue(ds, 'Window Center', str(windowCenter), iFrame, 'DS') # NOK
+        setTagValue(ds, 'Window Width', str(windowWidth), iFrame, 'DS') # NOK
+        setTagValue(ds, 'Rescale Intercept', str(rescaleIntercept), iFrame, 'DS') # NOK
+        setTagValue(ds, 'Rescale Slope', str(rescaleSlope), iFrame, 'DS') # NOK
+        setTagValue(ds, 'Series Number', str(seriesNumber), iFrame, 'IS') # NOK
+        setTagValue(ds, 'Echo Time', "0", iFrame, 'DS') # NOK
 
         if multiframe:
             imVol[z] = pixelData
             frames.append(iFrame)
         else:
-            ds.PixelData = pixelData
+            ds.PixelData = pixelData.tobytes()
             ds.save_as(str(filename))
 
     if multiframe:
         setTagValue(ds, 'SOP Instance UID', getSOPInstanceUID())
-        setTagValue(ds, 'Number of frames', len(frames))
-        ds[tagDict['Frame sequence']].value = \
-            [ds[tagDict['Frame sequence']].value[frame] for frame in frames]
-        ds.PixelData = imVol
+        setTagValue(ds, 'Number of Frames', len(frames))
+        val = [ds[tagDict['Frame Sequence']][frame] for frame in frames]
+        ds[tagDict['Frame sequence']].value = val
+        ds.PixelData = imVol.tobytes()
         filename = outDir / './0.dcm'
         ds.save_as(str(filename))
 
