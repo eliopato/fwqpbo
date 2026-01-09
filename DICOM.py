@@ -28,7 +28,7 @@ tagDict = {
     'Series Instance UID': 0x0020000E,
     'Series Number': 0x00200011,
     'Slice Location': 0x00201041,
-    'Image Position (Patient)': 0x00200032,
+    'Image Position Patient': 0x00200032,
     'Rows': 0x00280010,
     'Columns': 0x00280011,
     'Pixel Spacing': 0x00280030,
@@ -88,15 +88,44 @@ def typeTag2type(tagValue):
 # Retrieves DICOM element value from dataset ds at tag=key.
 # Use frame for multiframe DICOM files
 def getTagValue(ds: pydicom.Dataset, key: str, frame=None):
-    # Philips(?) private tag containing frame tags
-    # 0x2005140f = Image Patient Position
-    if (frame is not None and
-       0x2005140f in ds[tagDict['Frame sequence']].value[frame]):
-        frameObject = ds[tagDict['Frame sequence']].value[frame][0x2005140f][0]
-        if tagDict[key] in frameObject:
-            return frameObject[tagDict[key]].value
-    if tagDict[key] in ds:
-        return ds[tagDict[key]].value
+    
+    key_id = tagDict[key]
+
+    # multiframe images (enhanced dicom)
+    if frame is not None:
+
+        frame_ds = ds[tagDict['Frame sequence']].value[frame]
+        # Philips(?) private tag containing frame tags
+        # 0x2005140f = Image Patient Position
+        if 0x2005140f in frame_ds:
+            frame_ds = frame_ds[0x2005140f][0]
+        
+        if key_id in frame_ds:
+            return key_id.value
+    
+        if key == 'Echo Time':
+            return frame_ds.MREchoSequence[0].EffectiveEchoTime
+        
+        if key == 'Image Type':
+            return frame_ds.MRImageFrameTypeSequence[0].FrameType[2]
+        
+        if key == 'Slice Location':
+            return frame_ds.PlanePositionSequence[0].ImagePositionPatient[2]
+
+        if key == 'Imaging Frequency':
+            frame_ds = ds.SharedFunctionalGroupsSequence[0]
+            return frame_ds.MRImagingModifierSequence[0].TransmitterFrequency ## semble être en str() en comparaison mais bloque plus tard
+
+        if key == 'Pixel Spacing':
+            return frame_ds.PixelMeasuresSequence[0].PixelSpacing 
+
+        if key == 'Spacing Between Slices':
+            return frame_ds.PixelMeasuresSequence[0].SliceThickness
+
+    # standard Dicom
+    elif key_id in ds:
+        return ds[key_id].value
+    
     return None
 
 
@@ -139,9 +168,11 @@ def AttrInDataset(ds, attr, multiframe):
 
 # Check if ds is a multiframe DICOM object
 def isMultiFrame(ds):
-    return tagDict['Number of frames'] in ds and \
-        int(ds[tagDict['Number of frames']].value) > 1 and \
-        tagDict['Frame sequence'] in ds
+    if tagDict['Number of frames'] in ds:
+        if tagDict['Frame sequence'] in ds:
+            if int(ds[tagDict['Number of frames']].value) > 1:
+                return True
+    return False        
 
 
 # Extract files that are readable and have all required DICOM tags
