@@ -310,9 +310,12 @@ def updateDataParams(data_param, files):
         print('Warning: echo inter-spacing varies more than 5%')
         print(echo_times)
 
-    n_slices = len(set([tags[4] for tags in frame_list]))
+    # take all the slices if nothing is specified in the params
     if 'sliceList' not in data_param:
-        data_param['sliceList'] = range(n_slices)
+        n_slices = len(set([tags[4] for tags in frame_list]))
+        data_param['sliceList'] = [n for n in range(n_slices)]
+    else:
+        n_slices = len(data_param['sliceList'])
 
     data_param['nx'] = frame_list[0][6]
     data_param['ny'] = frame_list[0][7]
@@ -340,67 +343,77 @@ def updateDataParams(data_param, files):
             i = (data_param['nb_echoes'] * slice + n) * len(type)
             
             if type == 'MP':  # Magnitude/phase images
-                magn_frame = i
-                magn_file = frame_list[magn_frame][0]
+                
+                i_magn_frame = i
+                magn_file = frame_list[i_magn_frame][0]
                 magn_img = pydicom.read_file(str(magn_file)).pixel_array
-                phase_frame = i + 1
-                phase_file = frame_list[phase_frame][0]
+
+                i_phase_frame = i + 1
+                phase_file = frame_list[i_phase_frame][0]
                 phase_ds = pydicom.read_file(str(phase_file))
                 phase_img = phase_ds.pixel_array
-                print(phase_img.shape)
-                print(magn_img.shape)
-                if multiframe:
+                
+                # read the current slice, depending on the array shape (enhanced images have the slice as the 1st dimension)
+                if len(phase_img.shape) == 3:
+                    magn = magn_img[slice, y1:y2, x1:x2].flatten()
+                    phase = phase_img[slice, y1:y2, x1:x2].flatten()
+                elif len(phase_img.shape) == 2:
                     magn = magn_img[y1:y2, x1:x2].flatten()
                     phase = phase_img[y1:y2, x1:x2].flatten()
-                    rescale_intercept = getAttribute(dcm, 'Rescale Intercept', phase_frame)
-                    # rescale_intercept = np.abs(getAttribute(dcm, 'Rescale Intercept', frame_list[phase_frame][1]))
                 else:
-                    magn = magn_img[y1:y2, x1:x2].flatten()
-                    phase = phase_img[y1:y2, x1:x2].flatten()
-                    rescale_intercept = getAttribute(phase_ds, 'Rescale Intercept')
-                if rescale_intercept is None:
+                    raise Exception(f'the image shape should have 2 or 3 dimensions, not {len(phase_img.shape)}')
+                
+                # get rescale intercept
+                rescale_intercept = np.abs(getAttribute(dcm, 'Rescale Intercept', frame_list[i_phase_frame][1]))
+                if rescale_intercept is None or rescale_intercept == 0:
                     print('No Rescale Intercept DICOM tag found. Using 4096.')
                     rescale_intercept = 4096
-                else:
-                    # Abs val needed for Siemens data to get correct phase sign
-                    rescale_intercept = np.abs(rescale_intercept)
+                # Abs val needed for Siemens data to get correct phase sign
+                rescale_intercept = np.abs(rescale_intercept)
+                
                 # For some reason, intercept is used as slope (Siemens only?)
                 c = magn * np.exp(phase/float(rescale_intercept) * 2 * np.pi * 1j)
+            
             # Real/imaginary images and Magnitude/real/imaginary images
             elif type in ['RI', 'MRI', 'MPRI']:
-                if type == 'RI':
-                    real_frame = i + 1
-                elif type == 'MRI':
-                    real_frame = i + 2
-                elif type == 'MPRI':
-                    real_frame = i + 3
-                imag_frame = i
-                if multiframe:
-                    real_part = dcm.pixel_array[frame_list[real_frame][1]][y1:y2, x1:x2].flatten()
-                    imag_part = dcm.pixel_array[frame_list[imag_frame][1]][y1:y2, x1:x2].flatten()
-                    # Assumes real and imaginary slope/intercept are equal
-                    rescale_intercept = getAttribute(dcm, 'Rescale Intercept', frame_list[real_frame][1])
-                    rescale_slope = getAttribute(dcm, 'Rescale Slope', frame_list[real_frame][1])
+                
+                i_real_frame = i + type.index('R') + 1
+                real_file = frame_list[i_real_frame][0]
+                real_ds = pydicom.read_file(str(real_file))
+                real_img = real_ds.pixel_array
+
+                i_imag_frame = i
+                imag_file = frame_list[i_imag_frame][0]
+                imag_img = pydicom.read_file(str(imag_file)).pixel_array
+                
+                dcm_frame = frame_list[i_real_frame][1]
+
+                # read the current slice, depending on the array shape (enhanced images have the slice as the 1st dimension)
+                if len(phase_img.shape) == 3:
+                    real_part = real_img[slice, y1:y2, x1:x2].flatten()
+                    imag_part = imag_img[slice, y1:y2, x1:x2].flatten()
                 else:
-                    real_file = frame_list[real_frame][0]
-                    imag_file = frame_list[imag_frame][0]
-                    real_ds = pydicom.read_file(str(real_file))
-                    imag_ds = pydicom.read_file(str(imag_file))
-                    real_part = real_ds.pixel_array[y1:y2, x1:x2].flatten()
-                    imag_part = imag_ds.pixel_array[y1:y2, x1:x2].flatten()
-                    # Assumes real and imaginary slope/intercept are equal
-                    rescale_intercept = getAttribute(real_ds, 'Rescale Intercept')
-                    rescale_slope = getAttribute(real_ds, 'Rescale Slope')
+                    real_part = real_img[y1:y2, x1:x2].flatten()
+                    imag_part = imag_img[y1:y2, x1:x2].flatten()
+
+                # Assumes real and imaginary slope/intercept are equal
+                rescale_intercept = getAttribute(dcm, 'Rescale Intercept', dcm_frame)
+                rescale_slope = getAttribute(dcm, 'Rescale Slope', dcm_frame)
                 if rescale_intercept and rescale_slope:
                     offset = rescale_intercept/rescale_slope
                 else:
                     offset = -2047.5
+
                 c = (real_part + offset) + 1.0 * 1j * (imag_part + offset)
+
             else:
                 raise Exception('Unknown image types')
+            
             img.append(c)
+
     data_param['frame_list'] = frame_list
     img = np.array(img) * data_param['reScale']
+    # todo check that the dims are in the right order for enhanced image 
     img = np.reshape(img, shape=(data_param['nb_echoes'], data_param['nz'], data_param['ny'], data_param['nx']))
     data_param['img'] = img
 
@@ -520,20 +533,19 @@ def setTagValue(ds: pydicom.Dataset, key: str, val, frame=None, VR=None):
 
 # Save numpy array to DICOM image.
 # Based on input DICOM image if exists, else create from scratch
-def saveSeries(outDir: str, imgType:str, img: np.array, data_param: dict):
+def saveSeries(out_dir: str, img_type:str, img: np.array, data_param: dict):
     print('> Saving DICOM series')
-    print(outDir)
-    print(imgType)
-    print(type(img))
+    print(f'Image type: {img_type}')
+    print(f'Output directory: {out_dir}')
 
-    series_description = imgTypes[imgType]['descr']
-    seriesNumber = imgTypes[imgType]['seriesNumber']
-    if 'Rescale Intercept' in imgTypes[imgType]:
-        rescaleIntercept = imgTypes[imgType]['Rescale Intercept']
+    series_description = imgTypes[img_type]['descr']
+    series_number = imgTypes[img_type]['seriesNumber']
+    if 'Rescale Intercept' in imgTypes[img_type]:
+        rescale_intercept = imgTypes[img_type]['Rescale Intercept']
     else:
-        rescaleIntercept = 0.
-    if 'Rescale Slope' in imgTypes[imgType]:
-        rescale_slope = imgTypes[imgType]['Rescale Slope']
+        rescale_intercept = 0.
+    if 'Rescale Slope' in imgTypes[img_type]:
+        rescale_slope = imgTypes[img_type]['Rescale Slope']
     else:
         rescale_slope = 1.
     
@@ -549,12 +561,12 @@ def saveSeries(outDir: str, imgType:str, img: np.array, data_param: dict):
         
     for z, slice in enumerate(data_param['sliceList']):
         
-        filename = outDir / './{}.dcm'.format(slice)
+        filename = out_dir / './{}.dcm'.format(slice)
         # Extract slice, scale and type cast pixel data
-        pixelData = np.array([max(0, (val-rescaleIntercept)/rescale_slope) for val in img[:, :, z].flatten()])
+        pixelData = np.array([max(0, (val-rescale_intercept)/rescale_slope) for val in img[:, :, z].flatten()])
         pixelData = pixelData.astype('uint16')
         # Set window so that 95% of pixels are inside
-        windowCenter, windowWidth = getPercentileWindow(pixelData, rescaleIntercept, rescale_slope, 95)
+        windowCenter, windowWidth = getPercentileWindow(pixelData, rescale_intercept, rescale_slope, 95)
         if data_param['frame_list']:
             # Get frame
             frame = data_param['frame_list'][data_param['nb_echoes']*slice*len(DICOMimgType)]
@@ -596,9 +608,9 @@ def saveSeries(outDir: str, imgType:str, img: np.array, data_param: dict):
         setTagValue(ds, 'Largest Pixel Value', np.max(pixelData), n_frame)
         setTagValue(ds, 'Window Center', str(windowCenter), n_frame, 'DS')
         setTagValue(ds, 'Window Width', str(windowWidth), n_frame, 'DS')
-        setTagValue(ds, 'Rescale Intercept', str(rescaleIntercept), n_frame, 'DS')
+        setTagValue(ds, 'Rescale Intercept', str(rescale_intercept), n_frame, 'DS')
         setTagValue(ds, 'Rescale Slope', str(rescale_slope), n_frame, 'DS')
-        setTagValue(ds, 'Series Number', str(seriesNumber), n_frame, 'IS')
+        setTagValue(ds, 'Series Number', str(series_number), n_frame, 'IS')
         if isMultiFrame:
             setTagValue(ds, 'Echo Time', 0., n_frame, 'FD')
         else:
@@ -617,14 +629,14 @@ def saveSeries(outDir: str, imgType:str, img: np.array, data_param: dict):
         val = [ds[tag_dict['Frame Sequence']][frame] for frame in frames]
         ds[tag_dict['Frame sequence']].value = val
         ds.PixelData = imVol.tobytes()
-        filename = outDir / './0.dcm'
+        filename = out_dir / './0.dcm'
         ds.save_as(str(filename))
 
 
 # Save all data in output as DICOM images
 def save(output, data_param):
     for seriesType in output:
-        outDir = data_param['outDir'] / seriesType
-        outDir.mkdir(parents=True, exist_ok=True)
-        print(r'Writing image{} to "{}"'.format('s'*(data_param['nz'] > 1), outDir))
-        saveSeries(outDir, seriesType, output[seriesType], data_param)
+        out_dir = data_param['out_dir'] / seriesType
+        out_dir.mkdir(parents=True, exist_ok=True)
+        print(r'Writing image{} to "{}"'.format('s'*(data_param['nz'] > 1), out_dir))
+        saveSeries(out_dir, seriesType, output[seriesType], data_param)

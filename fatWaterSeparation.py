@@ -293,15 +293,15 @@ def modulationVectors(nB0, N):
 
 
 # Construct matrix RA
-def modelMatrix(data_param, mPar, R2):
-    RA = np.zeros(shape=(data_param['nb_echoes'], mPar['M']), dtype=complex)
+def modelMatrix(data_param, model_param, R2):
+    RA = np.zeros(shape=(data_param['nb_echoes'], model_param['M']), dtype=complex)
     for n in range(data_param['nb_echoes']):
         t = data_param['t1'] + n * data_param['dt']
-        for m in range(mPar['M']): # Loop over components/species
-            for p in range(mPar['P']):  # Loop over all resonances
+        for m in range(model_param['M']): # Loop over components/species
+            for p in range(model_param['P']):  # Loop over all resonances
                 # Chemical shift between water and peak m (in ppm)
-                omega = 2. * np.pi * gyro * data_param['B0'] * (mPar['CS'][p] - mPar['CS'][0])
-                RA[n, m] += mPar['alpha'][m][p]*np.exp(complex(-(t-data_param['t1'])*R2, t*omega))
+                omega = 2. * np.pi * gyro * data_param['B0'] * (model_param['CS'][p] - model_param['CS'][0])
+                RA[n, m] += model_param['alpha'][m][p]*np.exp(complex(-(t-data_param['t1'])*R2, t*omega))
     return RA
 
 
@@ -329,62 +329,62 @@ def getMeanEnergy(Y):
 
 
 # Perform the actual reconstruction
-def reconstruct(data_param, aPar, mPar, B0map=None, R2map=None):
-    determineB0 = aPar['graphcutLevel'] is not None or aPar['nICMiter'] > 0
-    determineR2 = (aPar['nR2'] > 1) and (R2map is None)
+def reconstruct(data_param, algo_param, model_param, B0map=None, R2map=None):
+    determineB0 = algo_param['graphcutLevel'] is not None or algo_param['nICMiter'] > 0
+    determineR2 = (algo_param['nR2'] > 1) and (R2map is None)
 
     Y = data_param['img']
 
     # Prepare matrices
     # Off-resonance modulation vectors (one for each off-resonance value)
-    B, Bh = modulationVectors(aPar['nB0'], data_param['nb_echoes'])
+    B, Bh = modulationVectors(algo_param['nB0'], data_param['nb_echoes'])
     RA, RAp, C, Qp = [], [], [], []
     D = None
-    if aPar['realEstimates']:
+    if algo_param['realEstimates']:
         D = []  # Matrix for calculating phi (needed for real-valued estimates)
-    for r in range(aPar['nR2']):
-        R2 = r*aPar['R2step']
-        RA.append(modelMatrix(data_param, mPar, R2))
-        if aPar['realEstimates']:
+    for r in range(algo_param['nR2']):
+        R2 = r*algo_param['R2step']
+        RA.append(modelMatrix(data_param, model_param, R2))
+        if algo_param['realEstimates']:
             D.append([])
             Dtmp = getDtmp(RA[r])
-            for b in range(aPar['nB0']):
+            for b in range(algo_param['nB0']):
                 D[r].append(np.dot(B[b].conj(), np.dot(Dtmp, Bh[b])))
             RA[r] = np.concatenate((np.real(RA[r]), np.imag(RA[r])))
         RAp.append(np.linalg.pinv(RA[r]))
 
-    if aPar['realEstimates']:
-        for b in range(aPar['nB0']):
+    if algo_param['realEstimates']:
+        for b in range(algo_param['nB0']):
             B[b] = realify(B[b])
             Bh[b] = realify(Bh[b])
-    for r in range(aPar['nR2']):
+    for r in range(algo_param['nR2']):
         C.append([])
         Qp.append([])
         # Null space projection matrix
-        proj = np.eye(data_param['nb_echoes']*(1+aPar['realEstimates']))-np.dot(RA[r], RAp[r])
-        for b in range(aPar['nB0']):
+        proj = np.eye(data_param['nb_echoes']*(1+algo_param['realEstimates']))-np.dot(RA[r], RAp[r])
+        for b in range(algo_param['nB0']):
             C[r].append(np.dot(np.dot(B[b], proj), Bh[b]))
             Qp[r].append(np.dot(RAp[r], Bh[b]))
 
     # For B0 index -> off-resonance in ppm
-    B0step = 1.0/aPar['nB0']/np.abs(data_param['dt'])/gyro/data_param['B0']
+    B0step = 1.0/algo_param['nB0']/np.abs(data_param['dt'])/gyro/data_param['B0']
     if determineB0:
         V = []  # Precalculate discontinuity costs
-        for b in range(aPar['nB0']):
-            V.append(min(b**2, (b-aPar['nB0'])**2))
+        for b in range(algo_param['nB0']):
+            V.append(min(b**2, (b-algo_param['nB0'])**2))
         V = np.array(V)
 
         level = {'L': 0, 'nx': data_param['nx'], 'ny': data_param['ny'], 'nz': data_param['nz'],
                  'sx': 1, 'sy': 1, 'sz': 1,
                  'dx': data_param['dx'], 'dy': data_param['dy'], 'dz': data_param['dz']}
-        J = getB0Residuals(Y, C, aPar['nB0'], aPar['iR2cand'], D)
-        offresPenalty = aPar['offresPenalty']
-        if aPar['offresPenalty'] > 0:
+        J = getB0Residuals(Y, C, algo_param['nB0'], algo_param['iR2cand'], D)
+        offresPenalty = algo_param['offresPenalty']
+        if algo_param['offresPenalty'] > 0:
             offresPenalty *= getMeanEnergy(Y)
 
-        dB0 = calculateFieldMap(aPar['nB0'], level, aPar['graphcutLevel'],
-                                aPar['multiScale'], aPar['maxICMupdate'],
-                                aPar['nICMiter'], J, V, aPar['mu'],
+        dB0 = calculateFieldMap(algo_param['nB0'], level, algo_param['graphcutLevel'],
+                                algo_param['multiScale'], algo_param['maxICMupdate'],
+                                algo_param['nICMiter'], J, V, algo_param['mu'],
                                 offresPenalty, int(data_param['offresCenter']/B0step))
     elif B0map is None:
         dB0 = np.zeros(Y.shape[1:], dtype=int)
@@ -392,17 +392,17 @@ def reconstruct(data_param, aPar, mPar, B0map=None, R2map=None):
         dB0 = np.array(B0map/B0step, dtype=int)
 
     if determineR2:
-        J = getR2Residuals(Y, dB0, C, aPar['nB0'], aPar['nR2'], D)
+        J = getR2Residuals(Y, dB0, C, algo_param['nB0'], algo_param['nR2'], D)
         R2 = np.argmin(J, axis=0) # brute force minimization
     elif R2map is None:
         R2 = np.zeros(Y.shape[1:], dtype=int)
     else:
-        R2 = np.array(R2map/aPar['R2step'], dtype=int)
+        R2 = np.array(R2map/algo_param['R2step'], dtype=int)
 
     # Find least squares solution given dB0 and R2
-    rho = np.zeros(shape=(mPar['M'], data_param['nz'], data_param['ny'], data_param['nx']), dtype=complex)
-    for r in range(aPar['nR2']):
-        for b in range(aPar['nB0']):
+    rho = np.zeros(shape=(model_param['M'], data_param['nz'], data_param['ny'], data_param['nx']), dtype=complex)
+    for r in range(algo_param['nR2']):
+        for b in range(algo_param['nB0']):
             vxls = (dB0 == b)*(R2 == r)
             if not D:  # complex estimates
                 y = Y[:, vxls]
@@ -420,7 +420,7 @@ def reconstruct(data_param, aPar, mPar, B0map=None, R2map=None):
         R2map = np.empty(Y.shape[1:])
 
     if determineR2:
-        R2map[:] = R2*aPar['R2step']
+        R2map[:] = R2*algo_param['R2step']
 
     if determineB0:
         B0map[:] = dB0*B0step

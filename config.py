@@ -1,4 +1,4 @@
-import configparser
+# import configparser
 import DICOM
 import MATLAB
 import numpy as np
@@ -8,25 +8,25 @@ import yaml
 
 # extract data parameter object representing a single slice
 def getSliceDataParams(data_param, slice, z):
-    sliceDataParams = dict(data_param)
-    sliceDataParams['sliceList'] = [slice]
-    sliceDataParams['img'] = data_param['img'][:, [z], :, :]
-    sliceDataParams['nz'] = 1
-    return sliceDataParams
+    slice_data_params = dict(data_param)
+    slice_data_params['sliceList'] = [slice]
+    slice_data_params['img'] = data_param['img'][:, [z], :, :]
+    slice_data_params['nz'] = 1
+    return slice_data_params
 
 
 # extract data_param object representing a slab of contiguous slices starting at z
 def getSlabDataParams(data_param, slices, z):
-    slabDataParams = dict(data_param)
-    slabDataParams['sliceList'] = slices
-    slabSize = len(slices)
-    slabDataParams['img'] = data_param['img'][:, z:z+slabSize, :, :]
-    slabDataParams['nz'] = slabSize
-    return slabDataParams
+    slab_data_params = dict(data_param)
+    slab_data_params['sliceList'] = slices
+    slab_size = len(slices)
+    slab_data_params['img'] = data_param['img'][:, z:z+slab_size, :, :]
+    slab_data_params['nz'] = slab_size
+    return slab_data_params
 
 
-# Update algorithm parameter object aPar and set default parameters
-def setupAlgoParams(aPar, N, nFAC=0):
+# Update algorithm parameter object algo_param and set default parameters
+def setupAlgoParams(algo_param, N, nFAC=0):
     defaults = [
         ('nR2', 1),
         ('R2max', 100.),
@@ -42,56 +42,56 @@ def setupAlgoParams(aPar, N, nFAC=0):
     ]
 
     for param, defval in defaults:
-        if param not in aPar:
-            aPar[param] = defval
+        if param not in algo_param:
+            algo_param[param] = defval
 
-    if 'graphcut' not in aPar:
-        aPar['graphcut'] = 'graphcutlevel' in aPar
+    if 'graphcut' not in algo_param:
+        algo_param['graphcut'] = 'graphcutlevel' in algo_param
     
-    if aPar['graphcut']:
-        if 'graphcutlevel' not in aPar:
-            aPar['graphcutLevel'] = 0
+    if algo_param['graphcut']:
+        if 'graphcutlevel' not in algo_param:
+            algo_param['graphcutLevel'] = 0
     else:
-        aPar['graphcutLevel'] = None
+        algo_param['graphcutLevel'] = None
 
-    if 'realEstimates' in aPar:
-        if not aPar['realEstimates'] and N==2:
+    if 'realEstimates' in algo_param:
+        if not algo_param['realEstimates'] and N==2:
             raise Exception('Real-valued estimates needed for two-point Dixon')
     elif N==2:
-        aPar['realEstimates'] = True
+        algo_param['realEstimates'] = True
     else:
-        aPar['realEstimates'] = False
+        algo_param['realEstimates'] = False
 
-    if aPar['nR2'] > 1:
-        aPar['R2step'] = aPar['R2max']/(aPar['nR2']-1)  # [sec-1]
+    if algo_param['nR2'] > 1:
+        algo_param['R2step'] = algo_param['R2max']/(algo_param['nR2']-1)  # [sec-1]
     else:
-        aPar['R2step'] = 1.0  # [sec-1]
+        algo_param['R2step'] = 1.0  # [sec-1]
     
-    aPar['iR2cand'] = np.array(list(set([min(aPar['nR2']-1, int(R2/aPar['R2step']))
-                            for R2 in aPar['R2cand']])))  # [msec]
+    algo_param['iR2cand'] = np.array(list(set([min(algo_param['nR2']-1, int(R2/algo_param['R2step']))
+                            for R2 in algo_param['R2cand']])))  # [msec]
 
-    aPar['maxICMupdate'] = round(aPar['nB0']/10)
+    algo_param['maxICMupdate'] = round(algo_param['nB0']/10)
 
-    # For Fatty Acid Composition, create algorithmParams for two passes: aPar and aPar['pass2']
+    # For Fatty Acid Composition, create algorithmParams for two passes: algo_param and algo_param['pass2']
     # First pass: use standard fat-water separation to determine B0 and R2*
     # Second pass: use B0- and R2*-maps from first pass
     if nFAC > 0:
-        aPar['pass2'] = dict(aPar)  # modify algoParams for pass 2:
-        aPar['pass2']['nICMiter'] = 0  # to omit ICM
-        aPar['pass2']['graphcutLevel'] = None  # to omit the graphcut
-        aPar['pass2']['graphcut'] = False
+        algo_param['pass2'] = dict(algo_param)  # modify algoParams for pass 2:
+        algo_param['pass2']['nICMiter'] = 0  # to omit ICM
+        algo_param['pass2']['graphcutLevel'] = None  # to omit the graphcut
+        algo_param['pass2']['graphcut'] = False
     
-    aPar['output'] = ['wat', 'fat', 'ff', 'B0map']
-    if aPar['realEstimates']:
-        aPar['output'].append('phi')
-    if (aPar['nR2'] > 1):
-        aPar['output'].append('R2map')
+    algo_param['output'] = ['wat', 'fat', 'ff', 'B0map']
+    if algo_param['realEstimates']:
+        algo_param['output'].append('phi')
+    if (algo_param['nR2'] > 1):
+        algo_param['output'].append('R2map')
     if (nFAC > 2):
-        aPar['output'].append('CL')
+        algo_param['output'].append('CL')
     if (nFAC > 1):
-        aPar['output'].append('PUD')
+        algo_param['output'].append('PUD')
     if (nFAC > 0):
-        aPar['output'].append('UD')
+        algo_param['output'].append('UD')
 
 
 # Get relative weights alpha of fat resonances based on CL, UD, and PUD per UD
@@ -128,8 +128,8 @@ def getFACalphas(CL=None, P2U=None, UD=None):
     return alpha
 
 
-# Update model parameter object mPar and set default parameters
-def setupModelParams(mPar, clockwisePrecession=False, temperature=None):
+# Update model parameter object model_param and set default parameters
+def setupModelParams(model_param, clockwisePrecession=False, temperature=None):
 
     defaults = [
         ('fatCS', [1.3]),
@@ -140,62 +140,62 @@ def setupModelParams(mPar, clockwisePrecession=False, temperature=None):
     ]
 
     for param, defval in defaults:
-        if param not in mPar:
-            mPar[param] = defval
+        if param not in model_param:
+            model_param[param] = defval
 
-    if 'watCS' not in mPar:
+    if 'watCS' not in model_param:
         if temperature: # Temperature dependence according to Hernando 2014
-            mPar['watCS'] = 1.3 + 3.748 -.01085 * temperature # Temp in [°C]
+            model_param['watCS'] = 1.3 + 3.748 -.01085 * temperature # Temp in [°C]
         else:
-            mPar['watCS'] = 4.7
+            model_param['watCS'] = 4.7
     
-    mPar['CS'] = np.array([mPar['watCS']] + mPar['fatCS'], dtype=np.float32)
+    model_param['CS'] = np.array([model_param['watCS']] + model_param['fatCS'], dtype=np.float32)
     
     if clockwisePrecession:
-        mPar['CS'] *= -1
+        model_param['CS'] *= -1
     
-    mPar['P'] = len(mPar['CS'])
+    model_param['P'] = len(model_param['CS'])
 
-    if mPar['nFAC'] > 0 and mPar['P'] != 11:
+    if model_param['nFAC'] > 0 and model_param['P'] != 11:
         raise Exception(
             'FAC excpects exactly one water and ten triglyceride resonances')
     
-    mPar['M'] = 2+mPar['nFAC']
+    model_param['M'] = 2+model_param['nFAC']
 
-    if mPar['nFAC'] == 0:
-        mPar['alpha'] = np.zeros([mPar['M'], mPar['P']], dtype=np.float32)
-        mPar['alpha'][0, 0] = 1.
-        if 'relAmps' in mPar:
-            for (p, a) in enumerate(mPar['relAmps']):
-                mPar['alpha'][1, p+1] = float(a)
+    if model_param['nFAC'] == 0:
+        model_param['alpha'] = np.zeros([model_param['M'], model_param['P']], dtype=np.float32)
+        model_param['alpha'][0, 0] = 1.
+        if 'relAmps' in model_param:
+            for (p, a) in enumerate(model_param['relAmps']):
+                model_param['alpha'][1, p+1] = float(a)
         else:
-            for p in range(1, mPar['P']):
-                mPar['alpha'][1, p] = float(1/len(fatCS))
-    elif mPar['nFAC'] == 1:
-        mPar['alpha'] = getFACalphas(mPar['CL'], mPar['P2U'])
-    elif mPar['nFAC'] == 2:
-        mPar['alpha'] = getFACalphas(mPar['CL'])
-    elif mPar['nFAC'] == 3:
-        mPar['alpha'] = getFACalphas()
+            for p in range(1, model_param['P']):
+                model_param['alpha'][1, p] = float(1/len(fatCS))
+    elif model_param['nFAC'] == 1:
+        model_param['alpha'] = getFACalphas(model_param['CL'], model_param['P2U'])
+    elif model_param['nFAC'] == 2:
+        model_param['alpha'] = getFACalphas(model_param['CL'])
+    elif model_param['nFAC'] == 3:
+        model_param['alpha'] = getFACalphas()
     else:
         raise Exception('Unknown number of FAC parameters: {}'
-                        .format(mPar['nFAC']))
+                        .format(model_param['nFAC']))
 
-    # For Fatty Acid Composition, create modelParams for two passes: mPar and mPar['pass2']
+    # For Fatty Acid Composition, create modelParams for two passes: model_param and model_param['pass2']
     # First pass: use standard fat-water separation to determine B0 and R2*
     # Second pass: do the Fatty Acid Composition
-    if mPar['nFAC'] > 0: 
-        mPar['pass2'] = dict(mPar) # copy mPar into pass 2, then modify pass 1
-        mPar['alpha'] = getFACalphas(mPar['CL'], mPar['P2U'], mPar['UD'])
-        mPar['M'] = mPar['alpha'].shape[0]
+    if model_param['nFAC'] > 0: 
+        model_param['pass2'] = dict(model_param) # copy model_param into pass 2, then modify pass 1
+        model_param['alpha'] = getFACalphas(model_param['CL'], model_param['P2U'], model_param['UD'])
+        model_param['M'] = model_param['alpha'].shape[0]
 
 
 # group slices in sliceList in slabs of reconSlab contiguous slices
-def getSlabs(sliceList, reconSlab):
+def getSlabs(slice_list, reconSlab):
     slabs = []
     slices = []
     pos = 0
-    for z, slice in enumerate(sliceList):
+    for z, slice in enumerate(slice_list):
         # start a new slab
         if slices and (len(slices) == reconSlab or not slice == slices[-1]+1):
             slabs.append((slices, pos))
