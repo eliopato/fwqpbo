@@ -170,7 +170,7 @@ def setupModelParams(model_param, clockwisePrecession=False, temperature=None):
                 model_param['alpha'][1, p+1] = float(a)
         else:
             for p in range(1, model_param['P']):
-                model_param['alpha'][1, p] = float(1/len(fatCS))
+                model_param['alpha'][1, p] = float(1/len(model_param['fatCS']))
     elif model_param['nFAC'] == 1:
         model_param['alpha'] = getFACalphas(model_param['CL'], model_param['P2U'])
     elif model_param['nFAC'] == 2:
@@ -208,9 +208,9 @@ def getSlabs(slice_list, reconSlab):
 
     
 # Update data param object, set default parameters and read data from files
-def setupDataParams(data_param, outDir=None):
-    if outDir:
-        data_param['outDir'] = Path(outDir)
+def setupDataParams(data_param: dict, out_dir:str|None=None) -> None:
+    if out_dir:
+        data_param['outDir'] = Path(out_dir)
     elif 'outDir' in data_param:
         data_param['outDir'] = Path(data_param['outDir'])
     else:
@@ -221,7 +221,8 @@ def setupDataParams(data_param, outDir=None):
         ('temperature', None),
         ('clockwisePrecession', False),
         ('offresCenter', 0.),
-        ('files', [])
+        ('files', []),
+        ('isEnhanced', False)
     ]
 
     for param, defval in defaults:
@@ -250,12 +251,12 @@ def setupDataParams(data_param, outDir=None):
         data_param['slabs'] = getSlabs(data_param['sliceList'], data_param['reconSlab'])
 
 
-# Read configuration file
-def readConfig(file):
+def readConfig(file: str) -> dict:
+    """ Read .yaml configuration file located at file and return a dictionnary"""
     file = Path(file)
-    with open(file, 'r') as configFile:
+    with open(file, 'r') as config_file:
         try:
-            config = yaml.safe_load(configFile)
+            config = yaml.safe_load(config_file)
         except yaml.YAMLError as exc:
             raise Exception(f'Error reading config file {file}') from exc
     config['configPath'] = file.parent

@@ -96,9 +96,9 @@ def reconstruct(data_param, algo_param, model_param):
     if 'phi' in algo_param['output']:
         output['phi'] = np.angle(wat, deg=True) + 180
     if 'ip' in algo_param['output']: # Calculate synthetic in-phase
-        output['ip'] = np.abs(wat+fat)
+        output['ip'] = np.abs(wat + fat)
     if 'op' in algo_param['output']: # Calculate synthetic opposed-phase
-        output['op'] = np.abs(wat-fat)
+        output['op'] = np.abs(wat - fat)
     if 'ff' in algo_param['output']: # Calculate the fat fraction
         if algo_param['magnitudeDiscrimination']:  # to avoid bias from noise
             output['ff'] = 100 * np.real(fat / (wat + fat + sys.float_info.epsilon))
@@ -136,7 +136,7 @@ def main(dataParamFile, algoParamFile, modelParamFile, outDir=None):
     config.setupAlgoParams(algo_param, data_param['nb_echoes'], model_param['nFAC'])
 
     print(f'B0 = {round(data_param["B0"], 2)}')
-    print(f'N = {data_param["nb_echoes"]}')
+    print(f'N echoes = {data_param["nb_echoes"]}')
     print(f't1/dt = {round(data_param["t1"]*1000, 2)}/{round(data_param["dt"]*1000, 2)} msec')
     print(f'nx,ny,nz = {data_param["nx"]},{data_param["ny"]},{data_param["nz"]}')
     print(f'dx,dy,dz = {round(data_param["dx"], 2)},{round(data_param["dy"], 2)},{round(data_param["dz"], 2)}')

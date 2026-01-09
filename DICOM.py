@@ -262,7 +262,7 @@ def getSeriesInstanceUID(data_param, series_description):
 
 
 # update data_param with info retrieved from the DICOM files including image data
-def updateDataParams(data_param, files):
+def updateDataParams(data_param: dict, files: list):
     data_param['fileType'] = 'DICOM'
     frame_list = []
 
@@ -272,6 +272,7 @@ def updateDataParams(data_param, files):
         multiframe = isMultiFrame(ds)
         # enhanced
         if multiframe:
+            data_param['isEnhanced'] = True
             for frame in range(len(ds[tag_dict['Frame sequence']].value)):
                 attr_list = [getAttribute(ds, attr, frame) for attr in reqAttributes]
                 frame_list.append([file] + [frame] + attr_list)
@@ -331,10 +332,6 @@ def updateDataParams(data_param, files):
         y1, y2 = 0, data_param['ny']
 
     img = []
-
-    if multiframe:
-        file = frame_list[0][0]
-        dcm = pydicom.read_file(str(file))
     
     for n in data_param['echoes']:
 
@@ -364,7 +361,7 @@ def updateDataParams(data_param, files):
                     raise Exception(f'the image shape should have 2 or 3 dimensions, not {len(phase_img.shape)}')
                 
                 # get rescale intercept
-                rescale_intercept = np.abs(getAttribute(dcm, 'Rescale Intercept', frame_list[i_phase_frame][1]))
+                rescale_intercept = np.abs(getAttribute(phase_ds, 'Rescale Intercept', frame_list[i_phase_frame][1]))
                 if rescale_intercept is None or rescale_intercept == 0:
                     print('No Rescale Intercept DICOM tag found. Using 4096.')
                     rescale_intercept = 4096
@@ -397,8 +394,8 @@ def updateDataParams(data_param, files):
                     imag_part = imag_img[y1:y2, x1:x2].flatten()
 
                 # Assumes real and imaginary slope/intercept are equal
-                rescale_intercept = getAttribute(dcm, 'Rescale Intercept', dcm_frame)
-                rescale_slope = getAttribute(dcm, 'Rescale Slope', dcm_frame)
+                rescale_intercept = getAttribute(real_ds, 'Rescale Intercept', dcm_frame)
+                rescale_slope = getAttribute(real_ds, 'Rescale Slope', dcm_frame)
                 if rescale_intercept and rescale_slope:
                     offset = rescale_intercept/rescale_slope
                 else:
@@ -413,7 +410,6 @@ def updateDataParams(data_param, files):
 
     data_param['frame_list'] = frame_list
     img = np.array(img) * data_param['reScale']
-    # todo check that the dims are in the right order for enhanced image 
     img = np.reshape(img, shape=(data_param['nb_echoes'], data_param['nz'], data_param['ny'], data_param['nx']))
     data_param['img'] = img
 
@@ -423,7 +419,7 @@ def getPercentileWindow(im, intercept, slope, percentile=95):
     lims = np.percentile(im, [(100-percentile)/2, percentile + (100-percentile)/2])
     width = lims[1]-lims[0]
     center = width/2.+lims[0]
-    return center*slope+intercept, width*slope
+    return center * slope + intercept, width * slope
 
 
 # Sets DICOM element value in dataset ds at tag=key. Use frame for multiframe
@@ -533,45 +529,49 @@ def setTagValue(ds: pydicom.Dataset, key: str, val, frame=None, VR=None):
 
 # Save numpy array to DICOM image.
 # Based on input DICOM image if exists, else create from scratch
-def saveSeries(out_dir: str, img_type:str, img: np.array, data_param: dict):
+def saveSeries(out_dir: str, img_type:str, img: np.array, data_param: dict) -> None:
     print('> Saving DICOM series')
     print(f'Image type: {img_type}')
     print(f'Output directory: {out_dir}')
 
     series_description = imgTypes[img_type]['descr']
     series_number = imgTypes[img_type]['seriesNumber']
+    series_instance_uid = getSeriesInstanceUID(data_param, series_description)
+
+    rescale_intercept = 0. # default value
+    rescale_slope = 1. # default value
     if 'Rescale Intercept' in imgTypes[img_type]:
         rescale_intercept = imgTypes[img_type]['Rescale Intercept']
-    else:
-        rescale_intercept = 0.
     if 'Rescale Slope' in imgTypes[img_type]:
         rescale_slope = imgTypes[img_type]['Rescale Slope']
-    else:
-        rescale_slope = 1.
     
-    seriesInstanceUID = getSeriesInstanceUID(data_param, series_description)
     # Single file is interpreted as multi-frame
-    multiframe = data_param['frame_list'] and len(set([frame[0] for frame in data_param['frame_list']])) == 1
-    if multiframe:
+    # multiframe = data_param['frame_list'] and len(set([frame[0] for frame in data_param['frame_list']])) == 1
+    
+    # enhanced dicom have all slices in one file
+    if data_param['isEnhanced']:
         ds = pydicom.read_file(str(data_param['frame_list'][0][0]))
-        imVol = np.empty([data_param['nz'], data_param['ny']*data_param['nx']], dtype='uint16')
+        img_vol = np.empty([data_param['nz'], data_param['ny'] * data_param['nx']], dtype='uint16')
         frames = []
+
     if data_param['frame_list']:
         DICOMimgType = getType(data_param['frame_list'])
-        
+    
+    print(DICOMimgType)
+
     for z, slice in enumerate(data_param['sliceList']):
-        
-        filename = out_dir / './{}.dcm'.format(slice)
+
+        output_filename = out_dir / './{}.dcm'.format(slice)
         # Extract slice, scale and type cast pixel data
-        pixelData = np.array([max(0, (val-rescale_intercept)/rescale_slope) for val in img[:, :, z].flatten()])
-        pixelData = pixelData.astype('uint16')
+        pixel_data = np.array([max(0, (val-rescale_intercept)/rescale_slope) for val in img[:, :, z].flatten()])
+        pixel_data = pixel_data.astype('uint16')
         # Set window so that 95% of pixels are inside
-        windowCenter, windowWidth = getPercentileWindow(pixelData, rescale_intercept, rescale_slope, 95)
+        window_center, window_width = getPercentileWindow(pixel_data, rescale_intercept, rescale_slope, 95)
         if data_param['frame_list']:
             # Get frame
             frame = data_param['frame_list'][data_param['nb_echoes']*slice*len(DICOMimgType)]
             n_frame = frame[1]
-            if not multiframe:
+            if not data_param['isEnhanced']:
                 ds = pydicom.read_file(str(frame[0]))
         else:
             n_frame = None
@@ -580,7 +580,7 @@ def saveSeries(out_dir: str, img_type:str, img: np.array, data_param: dict):
             file_meta.MediaStorageSOPInstanceUID = '1.3.6.1.4.1.9590.100.' + '1.1.111165684411017669021768385720736873780'
             file_meta.ImplementationClassUID = '1.3.6.1.4.1.9590.100.' + '1.0.100.4.0'
             file_meta.TransferSyntaxUID = pydicom.uid.ImplicitVRLittleEndian
-            ds = pydicom.dataset.FileDataset(filename, {}, file_meta=file_meta, preamble=b"\0"*128)
+            ds = pydicom.dataset.FileDataset(output_filename, {}, file_meta=file_meta, preamble=b"\0"*128)
             # Add DICOM tags:
             ds.Modality = 'WSD'
             ds.ContentDate = str(datetime.date.today()).replace('-', '')
@@ -601,42 +601,42 @@ def saveSeries(out_dir: str, img_type:str, img: np.array, data_param: dict):
 
         # Change/add DICOM tags:
         setTagValue(ds, 'SOP Instance UID', getSOPInstanceUID(), n_frame, 'UI') 
-        setTagValue(ds, 'Series Instance UID', seriesInstanceUID, n_frame, 'UI')
+        setTagValue(ds, 'Series Instance UID', series_instance_uid, n_frame, 'UI')
         setTagValue(ds, 'Protocol Name', 'Derived Image', n_frame, 'LO')
         setTagValue(ds, 'Series Description', series_description, n_frame, 'LO')
-        setTagValue(ds, 'Smallest Pixel Value', np.min(pixelData), n_frame)
-        setTagValue(ds, 'Largest Pixel Value', np.max(pixelData), n_frame)
-        setTagValue(ds, 'Window Center', str(windowCenter), n_frame, 'DS')
-        setTagValue(ds, 'Window Width', str(windowWidth), n_frame, 'DS')
+        setTagValue(ds, 'Smallest Pixel Value', np.min(pixel_data), n_frame)
+        setTagValue(ds, 'Largest Pixel Value', np.max(pixel_data), n_frame)
+        setTagValue(ds, 'Window Center', str(window_center), n_frame, 'DS')
+        setTagValue(ds, 'Window Width', str(window_width), n_frame, 'DS')
         setTagValue(ds, 'Rescale Intercept', str(rescale_intercept), n_frame, 'DS')
         setTagValue(ds, 'Rescale Slope', str(rescale_slope), n_frame, 'DS')
         setTagValue(ds, 'Series Number', str(series_number), n_frame, 'IS')
-        if isMultiFrame:
+
+        if data_param['isEnhanced']:
             setTagValue(ds, 'Echo Time', 0., n_frame, 'FD')
         else:
             setTagValue(ds, 'Echo Time', "0", n_frame, 'DS')
 
-        if multiframe:
-            imVol[z] = pixelData
+        if data_param['isEnhanced']:
+            img_vol[z] = pixel_data
             frames.append(n_frame)
         else:
-            ds.PixelData = pixelData.tobytes()
-            ds.save_as(str(filename))
+            ds.PixelData = pixel_data.tobytes()
+            ds.save_as(str(output_filename))
 
-    if multiframe:
+    if data_param['isEnhanced']:
         setTagValue(ds, 'SOP Instance UID', getSOPInstanceUID())
-        setTagValue(ds, 'Number of Frames', len(frames))
-        val = [ds[tag_dict['Frame Sequence']][frame] for frame in frames]
+        setTagValue(ds, 'Number of frames', str(len(frames)))
+        val = [ds[tag_dict['Frame sequence']][frame] for frame in frames]
         ds[tag_dict['Frame sequence']].value = val
-        ds.PixelData = imVol.tobytes()
-        filename = out_dir / './0.dcm'
-        ds.save_as(str(filename))
+        ds.PixelData = img_vol.tobytes()
+        ds.save_as(str(out_dir / './0.dcm'))
 
 
 # Save all data in output as DICOM images
-def save(output, data_param):
-    for seriesType in output:
-        out_dir = data_param['out_dir'] / seriesType
+def save(output: dict, data_param: dict) -> None:
+    for series_type in output:
+        out_dir = data_param['outDir'] / series_type
         out_dir.mkdir(parents=True, exist_ok=True)
-        print(r'Writing image{} to "{}"'.format('s'*(data_param['nz'] > 1), out_dir))
-        saveSeries(out_dir, seriesType, output[seriesType], data_param)
+        print(f'Writing images to {out_dir}')
+        saveSeries(out_dir, series_type, output[series_type], data_param)
