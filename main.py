@@ -13,27 +13,27 @@ gyro = 42.58  # 1H gyromagnetic ratio
 
 
 # Zero pad back any cropped FOV
-def padCropped(croppedImage, dPar):
-    if 'cropFOV' in dPar:
-        image = np.zeros((dPar['nz'], dPar['Ny'], dPar['Nx']))
-        x1, x2 = dPar['cropFOV'][0], dPar['cropFOV'][1]
-        y1, y2 = dPar['cropFOV'][2], dPar['cropFOV'][3]
+def padCropped(croppedImage, data_param):
+    if 'cropFOV' in data_param:
+        image = np.zeros((data_param['nz'], data_param['Ny'], data_param['Nx']))
+        x1, x2 = data_param['cropFOV'][0], data_param['cropFOV'][1]
+        y1, y2 = data_param['cropFOV'][2], data_param['cropFOV'][3]
         image[:, y1:y2, x1:x2] = croppedImage
         return image
     else:
         return croppedImage
 
 
-def save(output, dPar):
+def save(output, data_param):
     for seriesType in output: # zero pad if was cropped and reshape to row,col,slice
-        output[seriesType] = np.moveaxis(padCropped(output[seriesType].reshape((dPar['nz'], dPar['ny'], dPar['nx'])), dPar), 0, -1)
+        output[seriesType] = np.moveaxis(padCropped(output[seriesType].reshape((data_param['nz'], data_param['ny'], data_param['nx'])), data_param), 0, -1)
     
-    if dPar['fileType'] == 'DICOM':
-        DICOM.save(output, dPar)
-    elif dPar['fileType'] == 'MATLAB':
-        MATLAB.save(output, dPar)
+    if data_param['fileType'] == 'DICOM':
+        DICOM.save(output, data_param)
+    elif data_param['fileType'] == 'MATLAB':
+        MATLAB.save(output, data_param)
     else:
-        raise Exception('Unknown filetype: {}'.format(dPar['fileType']))
+        raise Exception('Unknown filetype: {}'.format(data_param['fileType']))
 
 
 # Merge output for slices reconstructed separately
@@ -80,10 +80,10 @@ def getFat(rho, alpha):
 
 
 # Perform fat/water separation and return prescribed output
-def reconstruct(dPar, aPar, mPar):
+def reconstruct(data_param, aPar, mPar):
 
     # Do the fat/water separation
-    rho, B0map, R2map = fatWaterSeparation.reconstruct(dPar, aPar, mPar)
+    rho, B0map, R2map = fatWaterSeparation.reconstruct(data_param, aPar, mPar)
     wat = rho[0]
     fat = getFat(rho, mPar['alpha'])
 
@@ -111,7 +111,7 @@ def reconstruct(dPar, aPar, mPar):
 
     # Do any Fatty Acid Composition in a second pass
     if mPar['nFAC'] > 0:
-        rho = fatWaterSeparation.reconstruct(dPar, aPar['pass2'], mPar['pass2'], B0map, R2map)[0]
+        rho = fatWaterSeparation.reconstruct(data_param, aPar['pass2'], mPar['pass2'], B0map, R2map)[0]
         CL, UD, PUD = getFattyAcidComposition(rho)
     
         if 'CL' in aPar['output']:
@@ -126,40 +126,40 @@ def reconstruct(dPar, aPar, mPar):
 
 def main(dataParamFile, algoParamFile, modelParamFile, outDir=None):
     # Read configuration files
-    dPar = config.readConfig(dataParamFile)
+    data_param = config.readConfig(dataParamFile)
     aPar = config.readConfig(algoParamFile)
     mPar = config.readConfig(modelParamFile)
 
     # Setup configuration objects
-    config.setupDataParams(dPar, outDir)
-    config.setupModelParams(mPar, dPar['clockwisePrecession'], dPar['temperature'])
-    config.setupAlgoParams(aPar, dPar['N'], mPar['nFAC'])
+    config.setupDataParams(data_param, outDir)
+    config.setupModelParams(mPar, data_param['clockwisePrecession'], data_param['temperature'])
+    config.setupAlgoParams(aPar, data_param['nb_echoes'], mPar['nFAC'])
 
-    print(f'B0 = {round(dPar["B0"], 2)}')
-    print(f'N = {dPar["N"]}')
-    print(f't1/dt = {round(dPar["t1"]*1000, 2)}/{round(dPar["dt"]*1000, 2)} msec')
-    print(f'nx,ny,nz = {dPar["nx"]},{dPar["ny"]},{dPar["nz"]}')
-    print(f'dx,dy,dz = {round(dPar["dx"], 2)},{round(dPar["dy"], 2)},{round(dPar["dz"], 2)}')
+    print(f'B0 = {round(data_param["B0"], 2)}')
+    print(f'N = {data_param["nb_echoes"]}')
+    print(f't1/dt = {round(data_param["t1"]*1000, 2)}/{round(data_param["dt"]*1000, 2)} msec')
+    print(f'nx,ny,nz = {data_param["nx"]},{data_param["ny"]},{data_param["nz"]}')
+    print(f'dx,dy,dz = {round(data_param["dx"], 2)},{round(data_param["dy"], 2)},{round(data_param["dz"], 2)}')
 
     # Run fat/water processing and save output
-    if aPar['use3D'] or len(dPar['sliceList']) == 1:
-        if 'slabs' in dPar:
-            for iSlab, (slices, z) in enumerate(dPar['slabs']):
-                print(f'Processing slab {iSlab+1}/{len(dPar['slabs'])} (slices {slices[0]+1}-{slices[-1]+1})...')
-                slabDataParams = config.getSlabDataParams(dPar, slices, z)
+    if aPar['use3D'] or len(data_param['sliceList']) == 1:
+        if 'slabs' in data_param:
+            for iSlab, (slices, z) in enumerate(data_param['slabs']):
+                print(f'Processing slab {iSlab+1}/{len(data_param['slabs'])} (slices {slices[0]+1}-{slices[-1]+1})...')
+                slabDataParams = config.getSlabDataParams(data_param, slices, z)
                 output = reconstruct(slabDataParams, aPar, mPar)
                 save(output, slabDataParams) # save data slab-wise to save memory
         else:
-            output = reconstruct(dPar, aPar, mPar)
-            save(output, dPar)
+            output = reconstruct(data_param, aPar, mPar)
+            save(output, data_param)
     else:
         output = []
-        for z, slice in enumerate(dPar['sliceList']):
+        for z, slice in enumerate(data_param['sliceList']):
             print('Processing slice {} ({}/{})...'
-                  .format(slice+1, z+1, len(dPar['sliceList'])))
-            sliceDataParams = config.getSliceDataParams(dPar, slice, z)
+                  .format(slice+1, z+1, len(data_param['sliceList'])))
+            sliceDataParams = config.getSliceDataParams(data_param, slice, z)
             output.append(reconstruct(sliceDataParams, aPar, mPar))
-        save(mergeOutputSlices(output), dPar)
+        save(mergeOutputSlices(output), data_param)
 
 
 if __name__ == '__main__':

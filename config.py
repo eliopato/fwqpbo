@@ -7,20 +7,20 @@ import yaml
 
 
 # extract data parameter object representing a single slice
-def getSliceDataParams(dPar, slice, z):
-    sliceDataParams = dict(dPar)
+def getSliceDataParams(data_param, slice, z):
+    sliceDataParams = dict(data_param)
     sliceDataParams['sliceList'] = [slice]
-    sliceDataParams['img'] = dPar['img'][:, [z], :, :]
+    sliceDataParams['img'] = data_param['img'][:, [z], :, :]
     sliceDataParams['nz'] = 1
     return sliceDataParams
 
 
-# extract dPar object representing a slab of contiguous slices starting at z
-def getSlabDataParams(dPar, slices, z):
-    slabDataParams = dict(dPar)
+# extract data_param object representing a slab of contiguous slices starting at z
+def getSlabDataParams(data_param, slices, z):
+    slabDataParams = dict(data_param)
     slabDataParams['sliceList'] = slices
     slabSize = len(slices)
-    slabDataParams['img'] = dPar['img'][:, z:z+slabSize, :, :]
+    slabDataParams['img'] = data_param['img'][:, z:z+slabSize, :, :]
     slabDataParams['nz'] = slabSize
     return slabDataParams
 
@@ -208,11 +208,11 @@ def getSlabs(sliceList, reconSlab):
 
     
 # Update data param object, set default parameters and read data from files
-def setupDataParams(dPar, outDir=None):
+def setupDataParams(data_param, outDir=None):
     if outDir:
-        dPar['outDir'] = Path(outDir)
-    elif 'outDir' in dPar:
-        dPar['outDir'] = Path(dPar['outDir'])
+        data_param['outDir'] = Path(outDir)
+    elif 'outDir' in data_param:
+        data_param['outDir'] = Path(data_param['outDir'])
     else:
         raise Exception('No outDir defined')
 
@@ -225,29 +225,29 @@ def setupDataParams(dPar, outDir=None):
     ]
 
     for param, defval in defaults:
-        if param not in dPar:
-            dPar[param] = defval
+        if param not in data_param:
+            data_param[param] = defval
 
-    if 'files' in dPar:
-        dPar['files'] = [dPar['configPath'] / file for file in list(dPar['files']) if Path(dPar['configPath'] / file).is_file()]
+    if 'files' in data_param:
+        data_param['files'] = [data_param['configPath'] / file for file in list(data_param['files']) if Path(data_param['configPath'] / file).is_file()]
     
-    if 'dirs' in dPar:
-        dPar['dirs'] = [dPar['configPath'] / dir for dir in list(dPar['dirs']) if Path(dPar['configPath'] / dir).is_dir()]
-        for path in dPar['dirs']:
-            dPar['files'] += [obj for obj in path.iterdir() if obj.is_file()]
+    if 'dirs' in data_param:
+        data_param['dirs'] = [data_param['configPath'] / dir for dir in list(data_param['dirs']) if Path(data_param['configPath'] / dir).is_dir()]
+        for path in data_param['dirs']:
+            data_param['files'] += [obj for obj in path.iterdir() if obj.is_file()]
     
-    validFiles = DICOM.getValidFiles(dPar['files'])
+    validFiles = DICOM.getValidFiles(data_param['files'])
     
     if validFiles:
-        DICOM.updateDataParams(dPar, validFiles)
+        DICOM.updateDataParams(data_param, validFiles)
     else:
-        if len(dPar['files']) == 1 and dPar['files'][0].suffix == '.mat':
-            MATLAB.updateDataParams(dPar, dPar['files'][0])
+        if len(data_param['files']) == 1 and data_param['files'][0].suffix == '.mat':
+            MATLAB.updateDataParams(data_param, data_param['files'][0])
         else:
             raise Exception('No valid files found')
     
-    if 'reconSlab' in dPar:
-        dPar['slabs'] = getSlabs(dPar['sliceList'], dPar['reconSlab'])
+    if 'reconSlab' in data_param:
+        data_param['slabs'] = getSlabs(data_param['sliceList'], data_param['reconSlab'])
 
 
 # Read configuration file
