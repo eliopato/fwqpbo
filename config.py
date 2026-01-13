@@ -1,27 +1,25 @@
-# import configparser
-import dicom_processing
 import numpy as np
 from pathlib import Path
 import yaml
+import dicom_tools
 from dicom_processing import FrameCollection
+import copy
 
 # extract data parameter object representing a single slice
-def get_slice_data_params(data_param: dict, slice: int, z: int):
-    slice_data_params = dict(data_param)
-    slice_data_params['slice_list'] = [slice]
-    slice_data_params['img'] = data_param['img'][:, [z], :, :]
-    slice_data_params['nz'] = 1
-    return slice_data_params
+def get_slice_data_params(frame_coll: FrameCollection, slice: int):
+    new_frame_coll = copy(frame_coll)
+    new_frame_coll.user_params['slice_list'] = [slice]
+    new_frame_coll.img = new_frame_coll.img[:, [slice], :, :]
+    return frame_coll
 
 
 # extract data_param object representing a slab of contiguous slices starting at z
-def get_slab_data_params(data_param: dict, slices: list[int], z: int):
-    slab_data_params = dict(data_param)
-    slab_data_params['slice_list'] = slices
+def get_slab_data_params(frame_coll: FrameCollection, slices: list[int]):
+    new_frame_coll = copy(frame_coll)
+    new_frame_coll.user_params['slice_list'] = slices
     slab_size = len(slices)
-    slab_data_params['img'] = data_param['img'][:, z:z + slab_size, :, :]
-    slab_data_params['nz'] = slab_size
-    return slab_data_params
+    new_frame_coll.img = new_frame_coll.img[:, slice:slice + slab_size, :, :]
+    return frame_coll
 
 
 # Update algorithm parameter object algo_param and set default parameters
@@ -53,20 +51,20 @@ def setup_algo_params(algo_param, N, n_fac=0):
     else:
         algo_param['graph_cut_level'] = None
 
-    if 'realEstimates' in algo_param:
-        if not algo_param['realEstimates'] and N==2:
+    if 'real_estimates' in algo_param:
+        if not algo_param['real_estimates'] and N==2:
             raise Exception('Real-valued estimates needed for two-point Dixon')
     elif N == 2:
-        algo_param['realEstimates'] = True
+        algo_param['real_estimates'] = True
     else:
-        algo_param['realEstimates'] = False
+        algo_param['real_estimates'] = False
 
     if algo_param['n_r2'] > 1:
-        algo_param['R2step'] = algo_param['r2_max']/(algo_param['n_r2']-1)  # [sec-1]
+        algo_param['r2_step'] = algo_param['r2_max']/(algo_param['n_r2']-1)  # [sec-1]
     else:
-        algo_param['R2step'] = 1.0  # [sec-1]
+        algo_param['r2_step'] = 1.0  # [sec-1]
     
-    ir2 = [min(algo_param['n_r2']-1, int(R2/algo_param['R2step'])) for R2 in algo_param['r2_cand']]
+    ir2 = [min(algo_param['n_r2']-1, int(R2/algo_param['r2_step'])) for R2 in algo_param['r2_cand']]
     algo_param['i_r2_cand'] = np.array(list(set(ir2)))  # [msec]
 
     algo_param['max_icm_update'] = round(algo_param['n_b0']/10)
@@ -80,11 +78,11 @@ def setup_algo_params(algo_param, N, n_fac=0):
         algo_param['pass2']['graph_cut_level'] = None  # to omit the graphcut
         algo_param['pass2']['graphcut'] = False
     
-    algo_param['output'] = ['wat', 'fat', 'ff', 'B0map']
-    if algo_param['realEstimates']:
+    algo_param['output'] = ['wat', 'fat', 'ff', 'b0_map']
+    if algo_param['real_estimates']:
         algo_param['output'].append('phi')
     if (algo_param['n_r2'] > 1):
-        algo_param['output'].append('R2map')
+        algo_param['output'].append('r2_map')
     if (n_fac > 2):
         algo_param['output'].append('CL')
     if (n_fac > 1):
@@ -189,25 +187,9 @@ def setup_model_params(model_param, clockwise_precession=False, temperature=None
         model_param['M'] = model_param['alpha'].shape[0]
 
 
-# group slices in slice_list in slabs of recon_slab contiguous slices
-def get_slabs(slice_list: list[int], recon_slab: int):
-    slabs = []
-    slices = []
-    pos = 0
-    for z, slice in enumerate(slice_list):
-        # start a new slab
-        if slices and (len(slices) == recon_slab or not slice == slices[-1]+1):
-            slabs.append((slices, pos))
-            slices = [slice]
-            pos = z
-        else:
-            slices.append(slice)
-    slabs.append((slices, pos))
-    return slabs
-
     
 # Update data param object, set default parameters and read data from files
-def setup_data_params(data_param: dict, out_dir:str|None=None) -> FrameCollection:
+def setup_data_params(data_param: dict, out_dir:str|None=None):
     if out_dir:
         data_param['out_dir'] = Path(out_dir)
     elif 'out_dir' in data_param:
@@ -235,16 +217,13 @@ def setup_data_params(data_param: dict, out_dir:str|None=None) -> FrameCollectio
         for path in data_param['dirs']:
             data_param['files'] += [obj for obj in path.iterdir() if obj.is_file()]
     
-    valid_files = dicom_processing.get_valid_files(data_param['files'])
+    valid_files = dicom_tools.get_valid_files(data_param['files'])
+    
     if not valid_files:
         raise Exception('No valid files found')
-
-    frames = dicom_processing.update_data_params(data_param, valid_files)
     
-    if 'recon_slab' in data_param:
-        data_param['slabs'] = get_slabs(frames.frame_indexes, data_param['recon_slab'])
+    data_param['files'] = valid_files
 
-    return frames
 
 
 def read_configfile(file: str) -> dict:

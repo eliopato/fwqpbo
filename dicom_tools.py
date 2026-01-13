@@ -55,10 +55,14 @@ tag_dict = {
 def get_tag_value(ds: pydicom.Dataset, key: str, frame=None):
     """ Retrieves DICOM element value from dataset ds at tag=key.
     Use frame for multiframe DICOM files"""
-    
     key_id = tag_dict[key]
     if key_id in ds:
-        return ds[key_id].value
+        val = ds[key_id].value
+        if key == 'Image Type':
+            for t in ['M', 'P', 'R', 'I']:
+                if t in val:
+                    return t
+        return val
     
     # multiframe images (enhanced dicom)
     if frame is not None:
@@ -77,10 +81,13 @@ def get_tag_value(ds: pydicom.Dataset, key: str, frame=None):
             return frame_ds.MREchoSequence[0].EffectiveEchoTime
         
         if key == 'Image Type':
-            return frame_ds.MRImageFrameTypeSequence[0].FrameType[2]
-            # value = typeTag2type(value)
+            type_list = frame_ds.MRImageFrameTypeSequence[0].FrameType[2]
+            for t in ['M', 'P', 'R', 'I']:
+                if t in type_list:
+                    return t
+            # value = type_tag_to_type(value)
             # if value is None:
-            #     value = seriesDescription2type(get_tag_value(ds, 'Series Description', frame))
+            #     value = series_description_to_type(get_tag_value(ds, 'Series Description', frame))
         
         if key == 'Slice Location':
             return frame_ds.PlanePositionSequence[0].ImagePositionPatient[2]
@@ -270,3 +277,19 @@ def set_tag_value(ds: pydicom.Dataset, key: str, val, frame=None, VR=None):
     print(f'Warning: DICOM tag {key} was not set')
     return False
 
+
+# group slices in slice_list in slabs of recon_slab contiguous slices
+def get_slabs(slice_list: list[int], recon_slab: int):
+    slabs = []
+    slices = []
+    pos = 0
+    for z, slice in enumerate(slice_list):
+        # start a new slab
+        if slices and (len(slices) == recon_slab or not slice == slices[-1]+1):
+            slabs.append((slices, pos))
+            slices = [slice]
+            pos = z
+        else:
+            slices.append(slice)
+    slabs.append((slices, pos))
+    return slabs

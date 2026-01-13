@@ -1,7 +1,7 @@
 import thinqpbo as tq
 import numpy as np
 from skimage.filters import threshold_otsu
-
+from dicom_processing import FrameCollection
 gyro = 42.576
 
 
@@ -293,15 +293,15 @@ def modulation_vectors(n_b0, N):
 
 
 # Construct matrix RA
-def model_matrix(data_param, model_param, R2):
-    RA = np.zeros(shape=(data_param['nb_echoes'], model_param['M']), dtype=complex)
-    for n in range(data_param['nb_echoes']):
-        t = data_param['t1'] + n * data_param['dt']
+def model_matrix(frame_coll: FrameCollection, model_param: dict, R2) -> np.array:
+    RA = np.zeros(shape=(frame_coll.n_echo, model_param['M']), dtype=complex)
+    for n in range(frame_coll.n_echo):
+        t = frame_coll.t1 + n * frame_coll.dt
         for m in range(model_param['M']): # Loop over components/species
             for p in range(model_param['P']):  # Loop over all resonances
                 # Chemical shift between water and peak m (in ppm)
-                omega = 2. * np.pi * gyro * data_param['B0'] * (model_param['CS'][p] - model_param['CS'][0])
-                RA[n, m] += model_param['alpha'][m][p]*np.exp(complex(-(t-data_param['t1'])*R2, t*omega))
+                omega = 2. * np.pi * gyro * frame_coll.b0 * (model_param['CS'][p] - model_param['CS'][0])
+                RA[n, m] += model_param['alpha'][m][p]*np.exp(complex(-(t-frame_coll.t1)*R2, t*omega))
     return RA
 
 
@@ -329,23 +329,23 @@ def get_mean_energy(Y):
 
 
 # Perform the actual reconstruction
-def reconstruct(data_param, algo_param, model_param, B0map=None, R2map=None):
+def reconstruct(frame_coll: FrameCollection, algo_param: dict, model_param: dict, B0map=None, R2map=None):
     determineB0 = algo_param['graph_cut_level'] is not None or algo_param['n_icm_iter'] > 0
     determineR2 = (algo_param['n_r2'] > 1) and (R2map is None)
 
-    Y = data_param['img']
+    Y = frame_coll.img
 
     # Prepare matrices
     # Off-resonance modulation vectors (one for each off-resonance value)
-    B, Bh = modulation_vectors(algo_param['n_b0'], data_param['nb_echoes'])
+    B, Bh = modulation_vectors(algo_param['n_b0'], frame_coll.n_echo)
     RA, RAp, C, Qp = [], [], [], []
     D = None
-    if algo_param['realEstimates']:
+    if algo_param['real_estimates']:
         D = []  # Matrix for calculating phi (needed for real-valued estimates)
     for r in range(algo_param['n_r2']):
-        R2 = r*algo_param['R2step']
-        RA.append(model_matrix(data_param, model_param, R2))
-        if algo_param['realEstimates']:
+        R2 = r*algo_param['r2_step']
+        RA.append(model_matrix(frame_coll, model_param, R2))
+        if algo_param['real_estimates']:
             D.append([])
             Dtmp = get_dtmp(RA[r])
             for b in range(algo_param['n_b0']):
@@ -353,7 +353,7 @@ def reconstruct(data_param, algo_param, model_param, B0map=None, R2map=None):
             RA[r] = np.concatenate((np.real(RA[r]), np.imag(RA[r])))
         RAp.append(np.linalg.pinv(RA[r]))
 
-    if algo_param['realEstimates']:
+    if algo_param['real_estimates']:
         for b in range(algo_param['n_b0']):
             B[b] = realify(B[b])
             Bh[b] = realify(Bh[b])
@@ -361,31 +361,33 @@ def reconstruct(data_param, algo_param, model_param, B0map=None, R2map=None):
         C.append([])
         Qp.append([])
         # Null space projection matrix
-        proj = np.eye(data_param['nb_echoes']*(1+algo_param['realEstimates']))-np.dot(RA[r], RAp[r])
+        proj = np.eye(frame_coll.n_echo*(1+algo_param['real_estimates']))-np.dot(RA[r], RAp[r])
         for b in range(algo_param['n_b0']):
             C[r].append(np.dot(np.dot(B[b], proj), Bh[b]))
             Qp[r].append(np.dot(RAp[r], Bh[b]))
 
     # For B0 index -> off-resonance in ppm
-    B0step = 1.0/algo_param['n_b0']/np.abs(data_param['dt'])/gyro/data_param['B0']
+    B0step = 1.0/algo_param['n_b0']/np.abs(frame_coll.dt)/gyro/frame_coll.b0
     if determineB0:
         V = []  # Precalculate discontinuity costs
         for b in range(algo_param['n_b0']):
             V.append(min(b**2, (b-algo_param['n_b0'])**2))
         V = np.array(V)
 
-        level = {'L': 0, 'nx': data_param['nx'], 'ny': data_param['ny'], 'nz': data_param['nz'],
+        level = {'L': 0, 
+                 'nx': frame_coll.nx, 'ny': frame_coll.ny, 'nz': frame_coll.n_frames_indexes,
                  'sx': 1, 'sy': 1, 'sz': 1,
-                 'dx': data_param['dx'], 'dy': data_param['dy'], 'dz': data_param['dz']}
+                 'dx': frame_coll.dx, 'dy': frame_coll.dy, 'dz': frame_coll.dz}
+        
         J = get_b0_residuals(Y, C, algo_param['n_b0'], algo_param['i_r2_cand'], D)
         offres_penalty = algo_param['offres_penalty']
         if algo_param['offres_penalty'] > 0:
             offres_penalty *= get_mean_energy(Y)
 
         dB0 = calculate_field_map(algo_param['n_b0'], level, algo_param['graph_cut_level'],
-                                algo_param['multiscale'], algo_param['max_icm_update'],
-                                algo_param['n_icm_iter'], J, V, algo_param['mu'],
-                                offres_penalty, int(data_param['offres_center']/B0step))
+                                  algo_param['multiscale'], algo_param['max_icm_update'],
+                                  algo_param['n_icm_iter'], J, V, algo_param['mu'],
+                                  offres_penalty, int(frame_coll.user_params['offres_center']/B0step))
     elif B0map is None:
         dB0 = np.zeros(Y.shape[1:], dtype=int)
     else:
@@ -397,10 +399,10 @@ def reconstruct(data_param, algo_param, model_param, B0map=None, R2map=None):
     elif R2map is None:
         R2 = np.zeros(Y.shape[1:], dtype=int)
     else:
-        R2 = np.array(R2map/algo_param['R2step'], dtype=int)
+        R2 = np.array(R2map/algo_param['r2_step'], dtype=int)
 
     # Find least squares solution given dB0 and R2
-    rho = np.zeros(shape=(model_param['M'], data_param['nz'], data_param['ny'], data_param['nx']), dtype=complex)
+    rho = np.zeros(shape=(model_param['M'], frame_coll.n_frames_indexes, frame_coll.ny, frame_coll.nx), dtype=complex)
     for r in range(algo_param['n_r2']):
         for b in range(algo_param['n_b0']):
             vxls = (dB0 == b)*(R2 == r)
@@ -420,7 +422,7 @@ def reconstruct(data_param, algo_param, model_param, B0map=None, R2map=None):
         R2map = np.empty(Y.shape[1:])
 
     if determineR2:
-        R2map[:] = R2*algo_param['R2step']
+        R2map[:] = R2*algo_param['r2_step']
 
     if determineB0:
         B0map[:] = dB0*B0step
