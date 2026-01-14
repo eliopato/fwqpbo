@@ -92,7 +92,7 @@ def setup_algo_params(algo_param, N, n_fac=0):
 
 
 # Get relative weights alpha of fat resonances based on CL, UD, and PUD per UD
-def getFACalphas(CL = None, P2U = None, UD = None):
+def get_fac_alphas(CL = None, P2U = None, UD = None):
     P = 11  # Expects one water and ten triglyceride resonances
     M = [CL, UD, P2U].count(None)+2
     alpha = np.zeros([M, P], dtype=np.float32)
@@ -154,10 +154,9 @@ def setup_model_params(model_param, clockwise_precession=False, temperature=None
     model_param['P'] = len(model_param['CS'])
 
     if model_param['n_fac'] > 0 and model_param['P'] != 11:
-        raise Exception(
-            'FAC excpects exactly one water and ten triglyceride resonances')
+        raise Exception('FAC excpects exactly one water and ten triglyceride resonances')
     
-    model_param['M'] = 2+model_param['n_fac']
+    model_param['M'] = 2 + model_param['n_fac']
 
     if model_param['n_fac'] == 0:
         model_param['alpha'] = np.zeros([model_param['M'], model_param['P']], dtype=np.float32)
@@ -169,23 +168,21 @@ def setup_model_params(model_param, clockwise_precession=False, temperature=None
             for p in range(1, model_param['P']):
                 model_param['alpha'][1, p] = float(1/len(model_param['fat_cs']))
     elif model_param['n_fac'] == 1:
-        model_param['alpha'] = getFACalphas(model_param['CL'], model_param['P2U'])
+        model_param['alpha'] = get_fac_alphas(model_param['CL'], model_param['P2U'])
     elif model_param['n_fac'] == 2:
-        model_param['alpha'] = getFACalphas(model_param['CL'])
+        model_param['alpha'] = get_fac_alphas(model_param['CL'])
     elif model_param['n_fac'] == 3:
-        model_param['alpha'] = getFACalphas()
+        model_param['alpha'] = get_fac_alphas()
     else:
-        raise Exception('Unknown number of FAC parameters: {}'
-                        .format(model_param['n_fac']))
+        raise Exception(f"Unknown number of FAC parameters: {model_param['n_fac']}")
 
     # For Fatty Acid Composition, create modelParams for two passes: model_param and model_param['pass2']
     # First pass: use standard fat-water separation to determine B0 and R2*
     # Second pass: do the Fatty Acid Composition
     if model_param['n_fac'] > 0: 
         model_param['pass2'] = dict(model_param) # copy model_param into pass 2, then modify pass 1
-        model_param['alpha'] = getFACalphas(model_param['CL'], model_param['P2U'], model_param['UD'])
+        model_param['alpha'] = get_fac_alphas(model_param['CL'], model_param['P2U'], model_param['UD'])
         model_param['M'] = model_param['alpha'].shape[0]
-
 
     
 # Update data param object, set default parameters and read data from files

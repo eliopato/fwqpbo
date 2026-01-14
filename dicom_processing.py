@@ -12,8 +12,8 @@ map_params_dict = {
     'ip': {'descr': 'In-phase', 'seriesNumber': 103},
     'op': {'descr': 'Opposed-phase', 'seriesNumber': 104},    
     'ff': {'descr': 'Fat Fraction (%)', 'seriesNumber': 105, 'RescaleIntercept': -100, 'RescaleSlope': 0.1},
-    'R2map': {'descr': 'R2* (msec-1)', 'seriesNumber': 106},
-    'B0map': {'descr': 'B0 inhomogeneity (ppm)', 'seriesNumber': 107, 'RescaleSlope': 0.001},
+    'r2_map': {'descr': 'R2* (msec-1)', 'seriesNumber': 106},
+    'b0_map': {'descr': 'B0 inhomogeneity (ppm)', 'seriesNumber': 107, 'RescaleSlope': 0.001},
     'CL': {'descr': 'FAC Chain length', 'seriesNumber': 108, 'RescaleSlope': 0.01},
     'UD': {'descr': 'FAC Unsaturation degree', 'seriesNumber': 109, 'RescaleSlope': 0.01},
     'PUD': {'descr': 'FAC Polyunsaturation degree', 'seriesNumber': 110, 'RescaleSlope': 0.01}
@@ -174,21 +174,17 @@ def read_input_images(data_param: dict):
     
     # select specified echoes from parameter file
     if 'echoes' in data_param:
-        selected_echoes = []
-        for et in data_param['echoes']:
-            if et not in frame_coll.echo_times:
-                print(f'Echo time selected in parameter file {et} not found in images')
-            else:
-                selected_echoes.append(et)
-        frame_coll.echo_times = selected_echoes
+        print('dropping echoes?')
+        frame_coll.echo_times = [frame_coll.echo_times[i] for i in data_param['echoes']]
     
     # check the number of echoes
     if frame_coll.n_echo < 2:
         raise Exception(f'At least 2 echoes required, only {frame_coll.n_echo} found')
     
-    frame_coll.t1 = frame_coll.echo_times[0]
-    frame_coll.dt = np.mean(np.diff(frame_coll.echo_times))
-    if not 0.95 < np.max(np.diff(frame_coll.echo_times))/frame_coll.dt < 1.05:
+    ms_echo_times = [et/1000 for et in frame_coll.echo_times]
+    frame_coll.t1 = ms_echo_times[0] 
+    frame_coll.dt = np.mean(np.diff(ms_echo_times)) 
+    if not 0.95 < np.max(np.diff(ms_echo_times))/frame_coll.dt < 1.05:
         print('Warning: echo inter-spacing varies more than 5%')
         print(frame_coll.echo_times)
 

@@ -329,9 +329,9 @@ def get_mean_energy(Y):
 
 
 # Perform the actual reconstruction
-def reconstruct(frame_coll: FrameCollection, algo_param: dict, model_param: dict, B0map=None, R2map=None):
+def reconstruct(frame_coll: FrameCollection, algo_param: dict, model_param: dict, b0_map=None, r2_map=None):
     determineB0 = algo_param['graph_cut_level'] is not None or algo_param['n_icm_iter'] > 0
-    determineR2 = (algo_param['n_r2'] > 1) and (R2map is None)
+    determineR2 = (algo_param['n_r2'] > 1) and (r2_map is None)
 
     Y = frame_coll.img
 
@@ -388,18 +388,18 @@ def reconstruct(frame_coll: FrameCollection, algo_param: dict, model_param: dict
                                   algo_param['multiscale'], algo_param['max_icm_update'],
                                   algo_param['n_icm_iter'], J, V, algo_param['mu'],
                                   offres_penalty, int(frame_coll.user_params['offres_center']/B0step))
-    elif B0map is None:
+    elif b0_map is None:
         dB0 = np.zeros(Y.shape[1:], dtype=int)
     else:
-        dB0 = np.array(B0map/B0step, dtype=int)
+        dB0 = np.array(b0_map/B0step, dtype=int)
 
     if determineR2:
         J = get_r2_residuals(Y, dB0, C, algo_param['n_b0'], algo_param['n_r2'], D)
         R2 = np.argmin(J, axis=0) # brute force minimization
-    elif R2map is None:
+    elif r2_map is None:
         R2 = np.zeros(Y.shape[1:], dtype=int)
     else:
-        R2 = np.array(R2map/algo_param['r2_step'], dtype=int)
+        R2 = np.array(r2_map/algo_param['r2_step'], dtype=int)
 
     # Find least squares solution given dB0 and R2
     rho = np.zeros(shape=(model_param['M'], frame_coll.n_frames_indexes, frame_coll.ny, frame_coll.nx), dtype=complex)
@@ -416,15 +416,15 @@ def reconstruct(frame_coll: FrameCollection, algo_param: dict, model_param: dict
                 phi[rho[0, vxls] < 0] += np.pi
                 rho[:, vxls] *= np.exp(1j*phi)
 
-    if B0map is None:
-        B0map = np.zeros(Y.shape[1:])
-    if R2map is None:
-        R2map = np.empty(Y.shape[1:])
+    if b0_map is None:
+        b0_map = np.zeros(Y.shape[1:])
+    if r2_map is None:
+        r2_map = np.empty(Y.shape[1:])
 
     if determineR2:
-        R2map[:] = R2*algo_param['r2_step']
+        r2_map[:] = R2*algo_param['r2_step']
 
     if determineB0:
-        B0map[:] = dB0*B0step
+        b0_map[:] = dB0*B0step
 
-    return rho, B0map, R2map
+    return rho, b0_map, r2_map
