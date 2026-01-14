@@ -28,9 +28,9 @@ FWQPBO is written in Python.
 HOW TO USE
 -------------------------------------------------------------------------------
 First install required packages, see dependencies.
-To use the command-line tool, type 
+Example command-line usage:
 ```
-./main.py -h.
+./main.py -d params/data.yml -a params/algo_3D.yml -m params/model.yml
 ```
 
 FORK UPDATES
