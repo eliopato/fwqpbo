@@ -22,8 +22,7 @@ separation with B0-correction based on QPBO graph cuts
 ](https://onlinelibrary.wiley.com/doi/abs/10.1002/mrm.26479). 
 Input paramaters are provided by human readable configuration files. 
 See example configuration files provided with FWQPBO for details. 
-Input data can be in DICOM format, or [MATLAB format according to the 
-ISMRM 2012 challenge](http://challenge.ismrm.org/node/14).
+Input data can be in DICOM format (standard or enhanced)
 FWQPBO is written in Python.
 
 HOW TO USE
@@ -33,9 +32,14 @@ To use the command-line tool, type
 ```
 ./main.py -h.
 ```
-To use as a Python script, see example file [./demo.py](demo.py). The demo
-reconstructs [data from the ISMRM 2012 challenge (data download required)
-](http://challenge.ismrm.org/node/4).
+
+FORK UPDATES
+-------------------------------------------------------------------------------
+The main differences between this project and the original one (available at [github/bertglun/fwqpbo](https://github.com/bretglun/fwqpbo)) are:
+- added support of Enhanced DICOM files
+- PEP8 formatting + on its way to have sphinx compatible comments
+- removed MatLab compatibility (you can use the original project for that :) )
+
 
 HOW TO CITE
 -------------------------------------------------------------------------------

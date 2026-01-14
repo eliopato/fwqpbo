@@ -19,7 +19,7 @@ req_attributes = ['Image Type',
                  'Columns', 
                  'Rows',
                  'Pixel Spacing',
-                 'Spacing Between Slices']
+                 'Slice Thickness']
 
 # Dictionary of DICOM tags
 tag_dict = {
@@ -62,6 +62,8 @@ def get_tag_value(ds: pydicom.Dataset, key: str, frame=None):
             for t in ['M', 'P', 'R', 'I']:
                 if t in val:
                     return t
+        elif key == 'Echo Time':
+            return float(val)
         return val
     
     # multiframe images (enhanced dicom)
@@ -85,21 +87,21 @@ def get_tag_value(ds: pydicom.Dataset, key: str, frame=None):
             for t in ['M', 'P', 'R', 'I']:
                 if t in type_list:
                     return t
-            # value = type_tag_to_type(value)
-            # if value is None:
-            #     value = series_description_to_type(get_tag_value(ds, 'Series Description', frame))
         
         if key == 'Slice Location':
             return frame_ds.PlanePositionSequence[0].ImagePositionPatient[2]
 
         if key == 'Imaging Frequency':
             frame_ds = ds.SharedFunctionalGroupsSequence[0]
-            return frame_ds.MRImagingModifierSequence[0].TransmitterFrequency ## semble être en str() en comparaison mais bloque plus tard
+            return frame_ds.MRImagingModifierSequence[0].TransmitterFrequency
 
         if key == 'Pixel Spacing':
             return frame_ds.PixelMeasuresSequence[0].PixelSpacing 
 
         if key == 'Spacing Between Slices':
+            return frame_ds.PixelMeasuresSequence[0].SpacingBetweenSlices
+        
+        if key == 'Slice Thickness':
             return frame_ds.PixelMeasuresSequence[0].SliceThickness
         
         if key == 'Rescale Intercept':
@@ -117,8 +119,8 @@ def get_tag_value(ds: pydicom.Dataset, key: str, frame=None):
     return None
 
 
-# Check if attribute is in DICOM dataset ds
 def attr_in_dataset(ds, attr, is_enhanced):
+    """Check if attribute is in DICOM dataset ds"""
     if get_tag_value(ds, attr) is not None:
         return True
     elif is_enhanced:
@@ -138,10 +140,13 @@ def is_enhanced(ds):
     return False        
 
 
-# Extract files that are readable and have all required DICOM tags
 def get_valid_files(files):
-    validFiles = []
+    """Extract files that are readable and have all required DICOM tags"""
+
+    valid_files = []
+    
     for file in files:
+    
         try:
             ds = pydicom.read_file(str(file), stop_before_pixels=True)
         except:
@@ -151,15 +156,16 @@ def get_valid_files(files):
         multiframe = is_enhanced(ds)
 
         has_required_attrs = [attr_in_dataset(ds, attr, multiframe) for attr in req_attributes]
+        
         if not all(has_required_attrs):
             print(f'File {file} is missing required DICOM tags:')
-            for i, hasAttr in enumerate(has_required_attrs):
-                if not hasAttr:
+            for i, has_attr in enumerate(has_required_attrs):
+                if not has_attr:
                     print(req_attributes[i])
             continue
         else:
-            validFiles.append(file)
-    return validFiles
+            valid_files.append(file)
+    return valid_files
 
 
 def get_sop_instance_uid():
@@ -278,14 +284,14 @@ def set_tag_value(ds: pydicom.Dataset, key: str, val, frame=None, VR=None):
     return False
 
 
-# group slices in slice_list in slabs of recon_slab contiguous slices
-def get_slabs(slice_list: list[int], recon_slab: int):
+# group slices in slice_list in slabs of slabs_size contiguous slices
+def get_slabs(slice_list: list[int], slabs_size: int):
     slabs = []
     slices = []
     pos = 0
     for z, slice in enumerate(slice_list):
         # start a new slab
-        if slices and (len(slices) == recon_slab or not slice == slices[-1]+1):
+        if slices and (len(slices) == slabs_size or not slice == slices[-1]+1):
             slabs.append((slices, pos))
             slices = [slice]
             pos = z

@@ -2,25 +2,6 @@ import numpy as np
 from pathlib import Path
 import yaml
 import dicom_tools
-from dicom_processing import FrameCollection
-import copy
-
-# extract data parameter object representing a single slice
-def get_slice_data_params(frame_coll: FrameCollection, slice: int):
-    new_frame_coll = copy(frame_coll)
-    new_frame_coll.user_params['slice_list'] = [slice]
-    new_frame_coll.img = new_frame_coll.img[:, [slice], :, :]
-    return frame_coll
-
-
-# extract data_param object representing a slab of contiguous slices starting at z
-def get_slab_data_params(frame_coll: FrameCollection, slices: list[int]):
-    new_frame_coll = copy(frame_coll)
-    new_frame_coll.user_params['slice_list'] = slices
-    slab_size = len(slices)
-    new_frame_coll.img = new_frame_coll.img[:, slice:slice + slab_size, :, :]
-    return frame_coll
-
 
 # Update algorithm parameter object algo_param and set default parameters
 def setup_algo_params(algo_param, N, n_fac=0):

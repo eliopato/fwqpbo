@@ -6,6 +6,6 @@ out_dir: /home/user/path/to/output/folder/
 #echoes: [0, 1, 2]
 #temperature: 37
 #crop_fov: [64, 128, 64, 92] # [x0, x1, y0, y1]
-#recon_slab: 2
+#slabs_size: 2
 #clockwise_precession: False
 #offres_center: 0.

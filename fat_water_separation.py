@@ -329,11 +329,26 @@ def get_mean_energy(Y):
 
 
 # Perform the actual reconstruction
-def reconstruct(frame_coll: FrameCollection, algo_param: dict, model_param: dict, b0_map=None, r2_map=None):
-    determineB0 = algo_param['graph_cut_level'] is not None or algo_param['n_icm_iter'] > 0
-    determineR2 = (algo_param['n_r2'] > 1) and (r2_map is None)
+def reconstruct(frame_coll: FrameCollection, algo_param: dict, model_param: dict, b0_map=None, r2_map=None, selected_slices: None|list[int]=None):
+    """Perform the water/fat separation
+    :params frame_coll: object containing the input volume information
+    :type frame_coll: FrameCollection
+    :params algo_param: user provided parameters for the reconstruction algorithm
+    :type algo_param: dict
+    :param model_params: user provided parameters for the reconstruction model
+    :type model_params: dict
+    :params selected_slices: used for 2D (slice by slice) or slabs (group of slices per group of slices) reconstruction
+    :type selected_slices: None or list of int"""
 
-    Y = frame_coll.img
+    dermine_b0 = algo_param['graph_cut_level'] is not None or algo_param['n_icm_iter'] > 0
+    dermine_r2 = (algo_param['n_r2'] > 1) and (r2_map is None)
+
+    if selected_slices is None:
+        Y = frame_coll.img
+        nz = frame_coll.n_slice_indexes
+    else:
+        Y = frame_coll.img[:, selected_slices, :, :]
+        nz = len(selected_slices)
 
     # Prepare matrices
     # Off-resonance modulation vectors (one for each off-resonance value)
@@ -368,14 +383,14 @@ def reconstruct(frame_coll: FrameCollection, algo_param: dict, model_param: dict
 
     # For B0 index -> off-resonance in ppm
     B0step = 1.0/algo_param['n_b0']/np.abs(frame_coll.dt)/gyro/frame_coll.b0
-    if determineB0:
+    if dermine_b0:
         V = []  # Precalculate discontinuity costs
         for b in range(algo_param['n_b0']):
             V.append(min(b**2, (b-algo_param['n_b0'])**2))
         V = np.array(V)
 
         level = {'L': 0, 
-                 'nx': frame_coll.nx, 'ny': frame_coll.ny, 'nz': frame_coll.n_frames_indexes,
+                 'nx': frame_coll.nx, 'ny': frame_coll.ny, 'nz': nz,
                  'sx': 1, 'sy': 1, 'sz': 1,
                  'dx': frame_coll.dx, 'dy': frame_coll.dy, 'dz': frame_coll.dz}
         
@@ -393,7 +408,7 @@ def reconstruct(frame_coll: FrameCollection, algo_param: dict, model_param: dict
     else:
         dB0 = np.array(b0_map/B0step, dtype=int)
 
-    if determineR2:
+    if dermine_r2:
         J = get_r2_residuals(Y, dB0, C, algo_param['n_b0'], algo_param['n_r2'], D)
         R2 = np.argmin(J, axis=0) # brute force minimization
     elif r2_map is None:
@@ -402,7 +417,7 @@ def reconstruct(frame_coll: FrameCollection, algo_param: dict, model_param: dict
         R2 = np.array(r2_map/algo_param['r2_step'], dtype=int)
 
     # Find least squares solution given dB0 and R2
-    rho = np.zeros(shape=(model_param['M'], frame_coll.n_frames_indexes, frame_coll.ny, frame_coll.nx), dtype=complex)
+    rho = np.zeros(shape=(model_param['M'], nz, frame_coll.ny, frame_coll.nx), dtype=complex)
     for r in range(algo_param['n_r2']):
         for b in range(algo_param['n_b0']):
             vxls = (dB0 == b)*(R2 == r)
@@ -421,10 +436,10 @@ def reconstruct(frame_coll: FrameCollection, algo_param: dict, model_param: dict
     if r2_map is None:
         r2_map = np.empty(Y.shape[1:])
 
-    if determineR2:
+    if dermine_r2:
         r2_map[:] = R2*algo_param['r2_step']
 
-    if determineB0:
+    if dermine_b0:
         b0_map[:] = dB0*B0step
 
     return rho, b0_map, r2_map

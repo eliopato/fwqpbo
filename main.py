@@ -11,7 +11,7 @@ from dicom_tools import get_slabs
 gyro = 42.58  # 1H gyromagnetic ratio
 
 
-# Merge output for slices reconstructed separately
+# Merge output for slices/slabs reconstructed separately
 def merged_output_slices(output_list):
     merged_output = output_list[0]
     for output in output_list[1:]:
@@ -54,12 +54,12 @@ def get_fat(rho, alpha):
     return fat
 
 
-def reconstruct(frame_coll: dicom_processing.FrameCollection, algo_param: dict, model_param: dict) -> dict:
+def reconstruct(frame_coll: dicom_processing.FrameCollection, algo_param: dict, model_param: dict, selected_slices:list[int]|None=None) -> dict:
     """Perform fat/water separation and return prescribed output.
     The output is a dict where keys are map names, and values are the numpy array images."""
 
     # Do the fat/water separation
-    rho, b0_map, r2_map = fat_water_separation.reconstruct(frame_coll, algo_param, model_param)
+    rho, b0_map, r2_map = fat_water_separation.reconstruct(frame_coll, algo_param, model_param, selected_slices=selected_slices)
     wat = rho[0]
     fat = get_fat(rho, model_param['alpha'])
 
@@ -87,7 +87,7 @@ def reconstruct(frame_coll: dicom_processing.FrameCollection, algo_param: dict, 
 
     # Do any Fatty Acid Composition in a second pass
     if model_param['n_fac'] > 0:
-        rho = fat_water_separation.reconstruct(frame_coll, algo_param['pass2'], model_param['pass2'], b0_map, r2_map)[0]
+        rho = fat_water_separation.reconstruct(frame_coll, algo_param['pass2'], model_param['pass2'], b0_map, r2_map, selected_slices=selected_slices)[0]
         CL, UD, PUD = get_fatty_acid_composition(rho)
     
         if 'CL' in algo_param['output']:
@@ -109,8 +109,8 @@ def main(data_param_filepath: str, algo_param_filepath: str, model_param_filepat
     # setup data params and read input images
     frame_coll = config.setup_data_params(data_param, out_dir)
     frame_coll = dicom_processing.read_input_images(data_param)    
-    if 'recon_slab' in frame_coll.user_params:
-        data_param['slabs'] = get_slabs(frame_coll.frame_indexes, data_param['recon_slab'])
+    if 'slabs_size' in frame_coll.user_params:
+        frame_coll.user_params['slabs'] = get_slabs(frame_coll.slice_indexes, data_param['slabs_size'])
 
     # setsup model and algo parameters
     config.setup_model_params(model_param, data_param['clockwise_precession'], data_param['temperature'])
@@ -119,29 +119,31 @@ def main(data_param_filepath: str, algo_param_filepath: str, model_param_filepat
     print(f'B0 = {round(frame_coll.b0, 2)}')
     print(f'N echoes = {frame_coll.n_echo}')
     print(f't1/dt = {round(frame_coll.t1*1000, 2)}/{round(frame_coll.dt*1000, 2)} msec')
-    print(f'nx,ny,nz = {frame_coll.nx},{frame_coll.ny},{frame_coll.n_frames_indexes}')
-    print(f'dx,dy,dz = {round(frame_coll.dx, 2)},{round(frame_coll.dy, 2)},{round(frame_coll.dz, 2)}')
+    print(f'nx,ny,nz = {frame_coll.nx}, {frame_coll.ny}, {frame_coll.n_slice_indexes}')
+    print(f'dx,dy,dz = {round(frame_coll.dx, 2)}, {round(frame_coll.dy, 2)}, {round(frame_coll.dz, 2)}')
 
     # Run fat/water processing and save output
-    if algo_param['use_3D'] or frame_coll.n_frame_indexes == 1:
-        if 'slabs' in data_param:
-            print('!!!!!!!!!!!! TODO')
-            # for i_slab, (slices, z) in enumerate(data_param['slabs']):
-            #     print(f'Processing slab {i_slab+1}/{len(data_param['slabs'])} (slices {slices[0]+1}-{slices[-1]+1})...')
-            #     slab_data_params = config.get_slab_data_params(data_param, slices, z)
-            #     output = reconstruct(slab_data_params, algo_param, model_param)
-            #     dicom_processing.save(output, slab_data_params) # save data slab-wise to save memory
-        else:
-            output = reconstruct(frame_coll, algo_param, model_param)
-            dicom_processing.save(output, frame_coll)
-    else:
-        print('!!!!!!!!!!! TODO')
+    
+    if not algo_param['use_3D'] or 'slabs' in frame_coll.user_params:
         output = []
-        for z_slice in frame_coll.frame_indexes:
-            print(f'Processing slice {z_slice+1} (/{frame_coll.n_frames_indexes})...')
-            slice_data_params = config.get_slice_data_params(frame_coll, z_slice)
-            output.append(reconstruct(slice_data_params, algo_param, model_param))
-        dicom_processing.save(merged_output_slices(output), frame_coll, data_param)
+        
+        if 'slabs' in frame_coll.user_params: 
+            for n_slab, (slices, _) in enumerate(frame_coll.user_params['slabs']):
+                print(f'Processing slab {n_slab+1}/{len(frame_coll.user_params['slabs'])} (slices {slices[0]+1}-{slices[-1]+1})...')
+                output.append(reconstruct(frame_coll, algo_param, model_param, selected_slices=slices))
+        elif not algo_param['use_3D']:
+            for z_slice in frame_coll.slice_indexes:
+                print(f'Processing slice {z_slice+1}/{frame_coll.n_slice_indexes}...')
+                output.append(reconstruct(frame_coll, algo_param, model_param, selected_slices=[z_slice]))
+        else:
+            raise Exception('Error: cant do slab processing if use_3D is set to False, please update the data_params.yml file')
+        output = merged_output_slices(output)
+        
+    elif algo_param['use_3D']:
+        output = reconstruct(frame_coll, algo_param, model_param)
+
+    dicom_processing.save(output, frame_coll)
+        
 
 
 if __name__ == '__main__':

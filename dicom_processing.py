@@ -1,6 +1,7 @@
 import pydicom
 import numpy as np
 import dicom_tools
+import re
 
 gyro = 42.58  # 1H gyromagnetic ratio
 
@@ -39,12 +40,12 @@ class FrameCollection():
         self.echo_times = None
 
     @property
-    def frame_indexes(self) -> list:
-        return list(set([s.frame_idx for s in self.frame_list]))
+    def slice_indexes(self) -> list:
+        return list(set([s.z_slice for s in self.frame_list]))
     
     @property
-    def n_frames_indexes(self) -> int:
-        return len(self.frame_indexes)
+    def n_slice_indexes(self) -> int:
+        return len(self.slice_indexes)
     
     @property
     def n_frames(self) -> int:
@@ -61,10 +62,10 @@ class FrameCollection():
         if z_idx is None and echo_time is None:
             return self.frame_list
         if echo_time is None:
-            return [s for s in self.frame_list if s.frame_idx == z_idx]
+            return [s for s in self.frame_list if s.z_slice == z_idx]
         if z_idx is None:
             return [s for s in self.frame_list if s.get_attr('Echo Time') == echo_time]
-        return [s for s in self.frame_list if s.get_attr('Echo Time') == echo_time and s.frame_idx == z_idx]
+        return [s for s in self.frame_list if s.get_attr('Echo Time') == echo_time and s.z_slice == z_idx]
         
     
     def __getitem__(self, index: int) -> Frame:
@@ -73,7 +74,7 @@ class FrameCollection():
     def get_all_attr_values(self, attr_name: str) -> list:
         return [s.get_attr(attr_name) for s in self.frame_list]
 
-    def select_frames(self, selected_z_indexes: list[int] | None, selected_echo_times: list[float] | None) -> None:
+    def select_frames(self, selected_z_indexes: list[int] | None) -> None:
         """Drop slices that are not in the provided list"""
         self.frame_list = [s for s in self.frame_list if s.z_index in selected_z_indexes]
 
@@ -152,10 +153,12 @@ def read_input_images(data_param: dict):
     # read file headers to get meta data
     for file in data_param['files']:
         ds = pydicom.read_file(str(file), stop_before_pixels=True)
+        # try to get Z index from DICOM tags
         if frame_coll.is_enhanced:
             frames = [(f, f) for f in range(len(dicom_tools.get_tag_value(ds, 'Frame sequence')))]
-        else: 
+        else:
             frames = [(None, dicom_tools.get_tag_value(ds, 'Frame Number'))]
+
         for n_frame, z_slice in frames:
             new_slice = Frame(str(file), n_frame, z_slice)
             for attr in dicom_tools.req_attributes:
@@ -166,12 +169,23 @@ def read_input_images(data_param: dict):
     first_slice = frame_coll[0]
     frame_coll.dx = float(first_slice.get_attr('Pixel Spacing')[1])
     frame_coll.dy = float(first_slice.get_attr('Pixel Spacing')[0])
-    frame_coll.dz = float(first_slice.get_attr('Spacing Between Slices'))
+    frame_coll.dz = float(first_slice.get_attr('Slice Thickness'))
     frame_coll.b0 = first_slice.get_attr('Imaging Frequency')/gyro
 
     # get the sorted list of echo times
     frame_coll.echo_times = sorted(set([et for et in frame_coll.get_all_attr_values('Echo Time')]))
     
+    # standard dicom, try to recover the frame number from filename if it wasnt recovered from attributes
+    if not frame_coll.is_enhanced and frame_coll.slice_indexes[0] is None:
+        for i, frame in enumerate(frame_coll):
+            z_slice = re.findall(r'.*_e0*[0-9]+_0*([0-9]+)\.dcm$', str(frame.path)) 
+            if len(z_slice) != 1:
+                print('Error, couldnt determine slice index from dicom header nor file name. Please adapt the regex to your file names. Use file index.')
+                frame.z_slice = (i % (n_slices))
+            else:
+                n_slices = len(frame_coll.frame_list) // (frame_coll.n_echo * len(frame_coll.get_image_types()))
+                frame.z_slice = (int(z_slice[0]) % (n_slices))
+
     # select specified echoes from parameter file
     if 'echoes' in data_param:
         print('dropping echoes?')
@@ -208,11 +222,12 @@ def read_input_images(data_param: dict):
     
     for echo_time in frame_coll.echo_times:
 
-        for z_index in frame_coll.frame_indexes:
+        for z_index in frame_coll.slice_indexes:
 
             frames = frame_coll.get_frames(z_index, echo_time)
             if len(frames) != len(img_types):
-                print(f'You should have {len(img_types)} frames for a given echo time/z_index for {img_types} images')
+                print(f'Error: You should have {len(img_types)} or frames for a given echo time/z_index for {img_types} images')
+                continue
 
             rescale_intercept = 0
             rescale_slope = 0
@@ -268,7 +283,7 @@ def read_input_images(data_param: dict):
             img.append(c)
 
     img = np.array(img) * frame_coll.user_params['rescale']
-    new_shape = (frame_coll.n_echo, frame_coll.n_frames_indexes, frame_coll.ny, frame_coll.nx)
+    new_shape = (frame_coll.n_echo, frame_coll.n_slice_indexes, frame_coll.ny, frame_coll.nx)
     frame_coll.img = np.reshape(img, shape=new_shape)
 
     return frame_coll
@@ -284,10 +299,12 @@ def get_percentile_window(im, intercept, slope, percentile=95):
 # Save all data in output as DICOM images
 def save(output: dict, frame_coll: FrameCollection) -> None:
     """ Save numpy array to DICOM image."""
-    
+
+    nz = frame_coll.n_slice_indexes
+
     for map_type in output:
         # zero pad if was cropped and reshape to row,col,slice
-        new_shape = (frame_coll.n_frames_indexes, frame_coll.ny, frame_coll.nx)
+        new_shape = (nz, frame_coll.ny, frame_coll.nx)
         output[map_type] = np.moveaxis(pad_cropped(output[map_type].reshape(new_shape), frame_coll.user_params), 0, -1)
         out_dir = frame_coll.user_params['out_dir'] / map_type
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -311,16 +328,13 @@ def save(output: dict, frame_coll: FrameCollection) -> None:
         # enhanced dicom have all slices in one file
         if frame_coll.is_enhanced:
             ds = pydicom.read_file(frame_coll[0].path)
-            img_vol = np.empty([frame_coll.n_frames_indexes, frame_coll.ny * frame_coll.nx], dtype='uint16')
+            img_vol = np.empty([nz, frame_coll.ny * frame_coll.nx], dtype='uint16')
         
-        img_types = frame_coll.get_image_types()
-
         for frame in frame_coll:
 
-            output_filename = f'{out_dir}/0.dcm' if frame_coll.is_enhanced else f'{out_dir}/{slice}.dcm'
+            output_filename = f'{out_dir}/0.dcm' if frame_coll.is_enhanced else f'{out_dir}/{frame.z_slice}.dcm'
 
             # Extract slice, scale and type cast pixel data
-            # pixel_data = np.array([max(0, (val-rescale_intercept)/rescale_slope) for val in img[:, :, z].flatten()])
             pixel_data = (np.array(output[map_type][:, :, frame.z_slice].flatten()) - rescale_intercept) / rescale_slope
             pixel_data[pixel_data < 0] = 0
             pixel_data = pixel_data.astype('uint16')
@@ -353,8 +367,7 @@ def save(output: dict, frame_coll: FrameCollection) -> None:
                 ds.save_as(str(output_filename))
 
         if frame_coll.is_enhanced:
-            dicom_tools.set_tag_value(ds, 'Number of frames', str(frame_coll.n_frames_indexes))
-            # ds[dicom_tools.tag_dict['Frame sequence']].value = [ds[dicom_tools.tag_dict['Frame sequence']][frame] for frame in frames]
+            dicom_tools.set_tag_value(ds, 'Number of frames', str(nz))
             ds.PixelData = img_vol.tobytes()
             ds.save_as(output_filename)
 
