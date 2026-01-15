@@ -52,8 +52,12 @@ See [./environment.yml](environment.yml)
 
 CONTACT INFORMATION
 -------------------------------------------------------------------------------
+
+For any question regarding the method:
 Johan Berglund, Ph.D.  
 Dept. of Clinical Neuroscience  
 Karolinska Institutet,  
 Stockholm, Sweden  
 johan.berglund@ki.se  
+
+For any bug or question related to this version of the code, feel free to [open an issue](https://github.com/eliopato/fwqpbo/issues)

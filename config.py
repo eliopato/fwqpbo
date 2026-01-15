@@ -203,7 +203,6 @@ def setup_data_params(data_param: dict, out_dir:str|None=None):
     data_param['files'] = valid_files
 
 
-
 def read_configfile(file: str) -> dict:
     """ Read .yaml configuration file located at file and return a dictionnary"""
     file = Path(file)
@@ -212,5 +211,8 @@ def read_configfile(file: str) -> dict:
             config = yaml.safe_load(config_file)
         except yaml.YAMLError as exc:
             raise Exception(f'Error reading config file {file}') from exc
+    # if the config file doesn't include any value
+    if config is None:
+        config = dict()
     config['config_path'] = file.parent
     return config

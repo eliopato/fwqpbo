@@ -76,7 +76,7 @@ class FrameCollection():
 
     def select_frames(self, selected_z_indexes: list[int] | None) -> None:
         """Drop slices that are not in the provided list"""
-        self.frame_list = [s for s in self.frame_list if s.z_index in selected_z_indexes]
+        self.frame_list = [s for s in self.frame_list if s.z_slice in selected_z_indexes]
 
     def get_image_types(self, print_type=False) -> str:
         """Get combination of image types for DICOM frames in frame_list. 
@@ -188,7 +188,7 @@ def read_input_images(data_param: dict):
 
     # select specified echoes from parameter file
     if 'echoes' in data_param:
-        print('dropping echoes?')
+        print('dropping echoes...')
         frame_coll.echo_times = [frame_coll.echo_times[i] for i in data_param['echoes']]
     
     # check the number of echoes
@@ -204,7 +204,8 @@ def read_input_images(data_param: dict):
 
     # take all the slices if nothing is specified in the params
     if 'slice_list' in frame_coll.user_params:
-        frame_coll.select_slices(frame_coll.user_params['slice_list'])
+        print('selecting specified slices...')
+        frame_coll.select_frames(frame_coll.user_params['slice_list'])
 
     frame_coll.nx = frame_coll[0].get_attr('Columns')
     frame_coll.ny = frame_coll[0].get_attr('Rows')
@@ -305,7 +306,8 @@ def save(output: dict, frame_coll: FrameCollection) -> None:
     for map_type in output:
         # zero pad if was cropped and reshape to row,col,slice
         new_shape = (nz, frame_coll.ny, frame_coll.nx)
-        output[map_type] = np.moveaxis(pad_cropped(output[map_type].reshape(new_shape), frame_coll.user_params), 0, -1)
+        output[map_type], nx, ny = pad_cropped(output[map_type].reshape(new_shape), frame_coll)
+        output[map_type] = np.moveaxis(output[map_type], 0, -1)
         out_dir = frame_coll.user_params['out_dir'] / map_type
         out_dir.mkdir(parents=True, exist_ok=True)
         print(f'Writing images to {out_dir}')
@@ -328,7 +330,7 @@ def save(output: dict, frame_coll: FrameCollection) -> None:
         # enhanced dicom have all slices in one file
         if frame_coll.is_enhanced:
             ds = pydicom.read_file(frame_coll[0].path)
-            img_vol = np.empty([nz, frame_coll.ny * frame_coll.nx], dtype='uint16')
+            img_vol = np.empty([nz, ny * nx], dtype='uint16')
         
         for frame in frame_coll:
 
@@ -372,15 +374,15 @@ def save(output: dict, frame_coll: FrameCollection) -> None:
             ds.save_as(output_filename)
 
 
-def pad_cropped(cropped_image: np.array, data_param: dict):
-    """Zero pad back any cropped FOV"""
-    if 'crop_fov' in data_param:
-        image = np.zeros((data_param['nz'], data_param['Ny'], data_param['Nx']))
-        x1, x2 = data_param['crop_fov'][0], data_param['crop_fov'][1]
-        y1, y2 = data_param['crop_fov'][2], data_param['crop_fov'][3]
+def pad_cropped(cropped_image: np.array, frame_coll: FrameCollection) -> tuple[np.array, int, int]:
+    """Zero pad back any cropped FOV.
+    Returns the padded image as a numpy array, the new number of rows (nx) and the new number of columns (ny)"""
+    if 'crop_fov' in frame_coll.user_params:
+        image = np.zeros((frame_coll.n_slice_indexes, frame_coll.Ny, frame_coll.Nx))
+        x1, x2, y1, y2 = frame_coll.user_params['crop_fov']
         image[:, y1:y2, x1:x2] = cropped_image
-        return image
+        return image, frame_coll.Nx, frame_coll.Ny
     else:
-        return cropped_image
+        return cropped_image, frame_coll.nx, frame_coll.ny
 
 
