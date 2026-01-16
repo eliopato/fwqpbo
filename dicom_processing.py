@@ -147,12 +147,12 @@ def type_tag_to_type(tag_value):
 def read_input_images(data_param: dict):
 
     # define if multiframe
-    ds = pydicom.read_file(str(data_param['files'][0]), stop_before_pixels=True)
+    ds = pydicom.dcmread(str(data_param['files'][0]), stop_before_pixels=True)
     frame_coll = FrameCollection(dicom_tools.is_enhanced(ds), data_param)
 
     # read file headers to get meta data
     for file in data_param['files']:
-        ds = pydicom.read_file(str(file), stop_before_pixels=True)
+        ds = pydicom.dcmread(str(file), stop_before_pixels=True)
         # try to get Z index from DICOM tags
         if frame_coll.is_enhanced:
             frames = [(f, f) for f in range(len(dicom_tools.get_tag_value(ds, 'Frame sequence')))]
@@ -239,7 +239,7 @@ def read_input_images(data_param: dict):
 
                 # read frames data
                 n_frame = f.frame_idx
-                ds = pydicom.read_file(str(f.path))
+                ds = pydicom.dcmread(str(f.path))
                 frame_img = ds.pixel_array
                 # read the current slice, depending on the array shape (enhanced images have the slice as the 1st dimension)
                 if len(frame_img.shape) == 3:
@@ -329,7 +329,7 @@ def save(output: dict, frame_coll: FrameCollection) -> None:
             
         # enhanced dicom have all slices in one file
         if frame_coll.is_enhanced:
-            ds = pydicom.read_file(frame_coll[0].path)
+            ds = pydicom.dcmread(frame_coll[0].path)
             img_vol = np.empty([nz, ny * nx], dtype='uint16')
         
         for frame in frame_coll:
@@ -345,7 +345,7 @@ def save(output: dict, frame_coll: FrameCollection) -> None:
             
             # for standard dicom, read the current slice file
             if not frame_coll.is_enhanced:
-                ds = pydicom.read_file(str(frame.path))
+                ds = pydicom.dcmread(str(frame.path))
         
             # Change/add DICOM tags:
             dicom_tools.set_tag_value(ds, 'SOP Instance UID', dicom_tools.get_sop_instance_uid(), frame.frame_idx, 'UI') 

@@ -1,0 +1,6 @@
+numpy
+pydicom
+scikit-image
+scipy
+thinqpbo
+pyyaml

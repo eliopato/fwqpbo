@@ -148,7 +148,7 @@ def get_valid_files(files):
     for file in files:
     
         try:
-            ds = pydicom.read_file(str(file), stop_before_pixels=True)
+            ds = pydicom.dcmread(str(file), stop_before_pixels=True)
         except:
             print(f'Could not read file: {file}')
             continue
