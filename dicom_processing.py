@@ -3,7 +3,7 @@ import numpy as np
 import dicom_tools
 import re
 
-gyro = 42.58  # 1H gyromagnetic ratio
+gyro = 42.576  # 1H gyromagnetic ratio
 
 # DICOM tags for output from fat/water separation
 map_params_dict = {
@@ -231,7 +231,7 @@ def read_input_images(data_param: dict):
                 continue
 
             rescale_intercept = 0
-            rescale_slope = 0
+            rescale_slope = 1
             n_frame = None
             frames_data = {}
         
@@ -290,7 +290,7 @@ def read_input_images(data_param: dict):
     return frame_coll
 
 # Set window so that percentile % of pixels are inside
-def get_percentile_window(im, intercept, slope, percentile=95):
+def get_percentile_window(im: np.array, intercept: float, slope: float, percentile=95):
     lims = np.percentile(im, [(100-percentile)/2, percentile + (100-percentile)/2])
     width = lims[1]-lims[0]
     center = width/2.+lims[0]

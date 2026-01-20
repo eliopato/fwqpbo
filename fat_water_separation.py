@@ -50,7 +50,7 @@ def QPBO(D, Vx, Vy, Vz):
 
 
 # Calculate LS error J as function of R2*
-def get_r2_residuals(Y, dB0, C, n_b0, n_r2, D=None):
+def get_r2_residuals(Y: np.array, dB0: int, C, n_b0: int, n_r2: int, D=None):
     J = np.zeros(shape=(n_r2, Y.shape[1], Y.shape[2], Y.shape[3]))
     for b in range(n_b0):
         for r in range(n_r2):
@@ -216,30 +216,31 @@ def calculate_field_map(n_b0, level: dict, graph_cut_level, multiscale, max_icm_
     print('DONE')
 
     # QPBO
-    graphcut = level['L'] >= graph_cut_level
-    if graphcut:
-        Vx = np.array(wx*[
-                      V[abs(A[:,:,:-1]-A[:,:,1:])],
-                      V[abs(A[:,:,:-1]-B[:,:,1:])],
-                      V[abs(B[:,:,:-1]-A[:,:,1:])],
-                      V[abs(B[:,:,:-1]-B[:,:,1:])]])
-        Vy = np.array(wy*[
-                      V[abs(A[:,:-1,:]-A[:,1:,:])],
-                      V[abs(A[:,:-1,:]-B[:,1:,:])],
-                      V[abs(B[:,:-1,:]-A[:,1:,:])],
-                      V[abs(B[:,:-1,:]-B[:,1:,:])]])
-        Vz = np.array(wz*[
-                      V[abs(A[:-1,:,:]-A[1:,:,:])],
-                      V[abs(A[:-1,:,:]-B[1:,:,:])],
-                      V[abs(B[:-1,:,:]-A[1:,:,:])],
-                      V[abs(B[:-1,:,:]-B[1:,:,:])]])
+    if graph_cut_level is not None:
+        graphcut = level['L'] >= graph_cut_level
+        if graphcut:
+            Vx = np.array(wx*[
+                        V[abs(A[:,:,:-1]-A[:,:,1:])],
+                        V[abs(A[:,:,:-1]-B[:,:,1:])],
+                        V[abs(B[:,:,:-1]-A[:,:,1:])],
+                        V[abs(B[:,:,:-1]-B[:,:,1:])]])
+            Vy = np.array(wy*[
+                        V[abs(A[:,:-1,:]-A[:,1:,:])],
+                        V[abs(A[:,:-1,:]-B[:,1:,:])],
+                        V[abs(B[:,:-1,:]-A[:,1:,:])],
+                        V[abs(B[:,:-1,:]-B[:,1:,:])]])
+            Vz = np.array(wz*[
+                        V[abs(A[:-1,:,:]-A[1:,:,:])],
+                        V[abs(A[:-1,:,:]-B[1:,:,:])],
+                        V[abs(B[:-1,:,:]-A[1:,:,:])],
+                        V[abs(B[:-1,:,:]-B[1:,:,:])]])
 
-        print('Solving MRF using QPBO...', end='')
-        label = QPBO(D, Vx, Vy, Vz)
-        print('DONE')
+            print('Solving MRF using QPBO...', end='')
+            label = QPBO(D, Vx, Vy, Vz)
+            print('DONE')
 
-        dB0[label == 0] = A[label == 0]
-        dB0[label == 1] = B[label == 1]
+            dB0[label == 0] = A[label == 0]
+            dB0[label == 1] = B[label == 1]
 
     # icm
     if n_icm_iter > 0:

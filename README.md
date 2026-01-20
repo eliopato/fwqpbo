@@ -8,7 +8,7 @@ Input data has to be in DICOM format (standard or enhanced).
 
 INSTALLATION
 -------------------------------------------------------------------------------
-Install dependencies by running `pip install -r requirements.txt` from a terminal located in the fwqbo folder.
+Install dependencies by running `pip install -r requirements.txt` from a terminal located in the fwqpbo folder.
 
 HOW TO USE
 -------------------------------------------------------------------------------
@@ -24,8 +24,8 @@ FORK UPDATES
 The main differences between this project and the original one (available at [github/bertglun/fwqpbo](https://github.com/bretglun/fwqpbo)) are:
 - added support of Enhanced DICOM files
 - PEP8 formatting + on its way to have sphinx compatible comments
-- removed MatLab compatibility (you can use the original project for that :) )
 - added compatibility with latest pydicom version (3.0.1)
+- removed MatLab compatibility and obsolete ISMRM 2012 data (no longer available)
 
 
 HOW TO CITE

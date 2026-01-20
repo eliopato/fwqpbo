@@ -8,8 +8,6 @@ import fat_water_separation
 import dicom_processing
 from dicom_tools import get_slabs
 
-gyro = 42.58  # 1H gyromagnetic ratio
-
 
 # Merge output for slices/slabs reconstructed separately
 def merged_output_slices(output_list):

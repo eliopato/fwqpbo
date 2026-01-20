@@ -24,10 +24,10 @@ def setup_algo_params(algo_param, N, n_fac=0):
             algo_param[param] = defval
 
     if 'graphcut' not in algo_param:
-        algo_param['graphcut'] = 'graphcutlevel' in algo_param
+        algo_param['graphcut'] = 'graph_cut_level' in algo_param
     
     if algo_param['graphcut']:
-        if 'graphcutlevel' not in algo_param:
+        if 'graph_cut_level' not in algo_param:
             algo_param['graph_cut_level'] = 0
     else:
         algo_param['graph_cut_level'] = None
