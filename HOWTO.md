@@ -79,8 +79,6 @@ wat_cs: 4.7
 n_fac: 0
 ```
 
-
-
 # ALGORITHM PARAMETERS
 
 All values are optional.

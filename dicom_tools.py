@@ -47,6 +47,7 @@ tag_dict = {
     'Window Width': 0x00281051,
     'Rescale Intercept': 0x00281052,
     'Rescale Slope': 0x00281053,
+    'Rescale Type': 0x00281054,
     'Number of frames': 0x00280008,
     'Frame sequence': 0x52009230,  # Per-frame Functional Groups Sequence
     'Frame Number': 0x00081160}  # slice number

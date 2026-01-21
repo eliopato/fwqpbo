@@ -230,8 +230,6 @@ def read_input_images(data_param: dict):
                 print(f'Error: You should have {len(img_types)} or frames for a given echo time/z_index for {img_types} images')
                 continue
 
-            rescale_intercept = 0
-            rescale_slope = 1
             n_frame = None
             frames_data = {}
         
@@ -249,37 +247,44 @@ def read_input_images(data_param: dict):
                 else:
                     raise Exception(f'the image shape should have 2 or 3 dimensions, not {len(img.shape)}')
 
-                frames_data[f.get_attr('Image Type')] = {'img': frame_img, 'ds': ds}
+                rescale_intercept = dicom_tools.get_tag_value(ds, 'Rescale Intercept', n_frame)
+                rescale_slope = dicom_tools.get_tag_value(ds, 'Rescale Slope', n_frame)
+
+                frames_data[f.get_attr('Image Type')] = {'img': frame_img, 
+                                                         'ds': ds, 
+                                                         'rescale_intercept': rescale_intercept if rescale_intercept is not None else 0,
+                                                         'rescale_slope': rescale_slope if rescale_slope is not None else 1,
+                                                         'rescale_type': dicom_tools.get_tag_value(ds, 'Rescale Type', n_frame)
+                                                         }
             
             # Magnitude/phase images
             if img_types == 'MP':  
-            
-                # get rescale intercept
-                rescale_intercept = np.abs(dicom_tools.get_tag_value(frames_data['P']['ds'], 'Rescale Intercept', n_frame))
-                if rescale_intercept is None or rescale_intercept == 0:
-                    print('No Rescale Intercept DICOM tag found. Using 4096.')
-                    rescale_intercept = 4096
-                # Abs val needed for Siemens data to get correct phase sign
-                rescale_intercept = float(np.abs(rescale_intercept))
+                # we need to convert phase image from their original values ranges (e.g. [0:4095]) to [-pi:pi]. 
+                if ds.Manufacturer.startswith('Philips'):
+                    rescale_type = frames_data['P']['rescale_type']
+                    if rescale_type is None or rescale_type == 'mrad':
+                        pscale = 0.001
+                    else:
+                        raise RuntimeError(f'Unknown Phase RescaleType: {rescale_type}')
+                else:
+                    # 4096 comes from the max bits allocated that should be 12 (2^12 = 4096) - see dicom tag BitsAllocated
+                    pscale = np.pi/4096
+                    if not ds.Manufacturer.startswith('Siemens'):
+                        print(f'Phase scaling value not specified for manufacturer {ds.Manufacturer}, using default (pi/4096)')
 
-                # For some reason, intercept is used as slope (Siemens only?)
-                c = frames_data['M']['img'] * np.exp(frames_data['P']['img']/rescale_intercept * 2 * np.pi * 1j)
-            
+                magn_img = frames_data['M']['img'] * frames_data['M']['rescale_slope'] + frames_data['M']['rescale_intercept']
+                phase_img = frames_data['P']['img'] * frames_data['P']['rescale_slope'] + frames_data['P']['rescale_intercept']
+                c = magn_img * np.exp(1j * pscale * phase_img)
+                
             # Real/imaginary images and Magnitude/real/imaginary images -> only use R and I images
             elif img_types in ['RI', 'MRI', 'MPRI']:
                 
-                # Assumes real and imaginary slope/intercept are equal
-                rescale_intercept = dicom_tools.get_tag_value(frames_data['R']['ds'], 'Rescale Intercept', n_frame)
-                rescale_slope = dicom_tools.get_tag_value(frames_data['R']['ds'], 'Rescale Slope', n_frame)
-                if rescale_intercept and rescale_slope:
-                    offset = rescale_intercept/rescale_slope
-                else:
-                    offset = -2047.5
-
-                c = (frames_data['R']['img'] + offset) + 1.0 * 1j * (frames_data['I']['img'] + offset)
+                real_part = frames_data['R']['img'] * frames_data['R']['rescale_intercept'] + frames_data['R']['rescale_slope']
+                imag_part = frames_data['I']['img'] * frames_data['I']['rescale_intercept'] + frames_data['I']['rescale_slope']
+                c =  real_part + 1j * (imag_part)
 
             else:
-                raise Exception('Unknown image types')
+                raise RuntimeError('Unknown image types')
             
             img.append(c)
 
@@ -289,19 +294,14 @@ def read_input_images(data_param: dict):
 
     return frame_coll
 
-# Set window so that percentile % of pixels are inside
-def get_percentile_window(im: np.array, intercept: float, slope: float, percentile=95):
-    lims = np.percentile(im, [(100-percentile)/2, percentile + (100-percentile)/2])
-    width = lims[1]-lims[0]
-    center = width/2.+lims[0]
-    return center * slope + intercept, width * slope
-
-
 # Save all data in output as DICOM images
 def save(output: dict, frame_coll: FrameCollection) -> None:
     """ Save numpy array to DICOM image."""
 
     nz = frame_coll.n_slice_indexes
+    # to keep values as precise as possible, map to full 16 bits values (max int 65535 instead of 4095 initially)
+    nb_bits_used = 16
+    max_pixel = (2**16) - 1  # rescale to make full usage of uint16 storage
 
     for map_type in output:
         # zero pad if was cropped and reshape to row,col,slice
@@ -319,13 +319,6 @@ def save(output: dict, frame_coll: FrameCollection) -> None:
         series_description = map_params_dict[map_type]['descr']
         series_number = map_params_dict[map_type]['seriesNumber']
         series_instance_uid = dicom_tools.get_series_instance_uid(frame_coll.user_params, series_description)
-
-        rescale_intercept = 0. # default value
-        rescale_slope = 1. # default value
-        if 'Rescale Intercept' in map_params_dict[map_type]:
-            rescale_intercept = map_params_dict[map_type]['Rescale Intercept']
-        if 'Rescale Slope' in map_params_dict[map_type]:
-            rescale_slope = map_params_dict[map_type]['Rescale Slope']
             
         # enhanced dicom have all slices in one file
         if frame_coll.is_enhanced:
@@ -337,12 +330,13 @@ def save(output: dict, frame_coll: FrameCollection) -> None:
             output_filename = f'{out_dir}/0.dcm' if frame_coll.is_enhanced else f'{out_dir}/{frame.z_slice}.dcm'
 
             # Extract slice, scale and type cast pixel data
-            pixel_data = (np.array(output[map_type][:, :, frame.z_slice].flatten()) - rescale_intercept) / rescale_slope
-            pixel_data[pixel_data < 0] = 0
-            pixel_data = pixel_data.astype('uint16')
-            # Set window so that 95% of pixels are inside
-            window_center, window_width = get_percentile_window(pixel_data, rescale_intercept, rescale_slope, 95)
-            
+            pixel_data = np.array(output[map_type][:, :, frame.z_slice].flatten())
+            # pixel_data[pixel_data < 0] = 0
+            rescale_intercept = np.floor(pixel_data.min())
+            rescale_slope = (pixel_data.max() - rescale_intercept)/max_pixel
+            pixel_data = (pixel_data - rescale_intercept) / rescale_slope
+            pixel_data = np.round(pixel_data).astype('uint16')
+
             # for standard dicom, read the current slice file
             if not frame_coll.is_enhanced:
                 ds = pydicom.dcmread(str(frame.path))
@@ -352,13 +346,17 @@ def save(output: dict, frame_coll: FrameCollection) -> None:
             dicom_tools.set_tag_value(ds, 'Series Instance UID', series_instance_uid, frame.frame_idx, 'UI')
             dicom_tools.set_tag_value(ds, 'Protocol Name', 'Derived Image', frame.frame_idx, 'LO')
             dicom_tools.set_tag_value(ds, 'Series Description', series_description, frame.frame_idx, 'LO')
-            dicom_tools.set_tag_value(ds, 'Smallest Pixel Value', np.min(pixel_data), frame.frame_idx)
-            dicom_tools.set_tag_value(ds, 'Largest Pixel Value', np.max(pixel_data), frame.frame_idx)
-            dicom_tools.set_tag_value(ds, 'Window Center', str(window_center), frame.frame_idx, 'DS')
-            dicom_tools.set_tag_value(ds, 'Window Width', str(window_width), frame.frame_idx, 'DS')
+            dicom_tools.set_tag_value(ds, 'Smallest Pixel Value', 0, frame.frame_idx)
+            dicom_tools.set_tag_value(ds, 'Largest Pixel Value', max_pixel, frame.frame_idx)
+            dicom_tools.set_tag_value(ds, 'Window Center', str(max_pixel/2), frame.frame_idx, 'DS')
+            dicom_tools.set_tag_value(ds, 'Window Width', str(max_pixel), frame.frame_idx, 'DS')
             dicom_tools.set_tag_value(ds, 'Rescale Intercept', str(rescale_intercept), frame.frame_idx, 'DS')
-            dicom_tools.set_tag_value(ds, 'Rescale Slope', str(rescale_slope), frame.frame_idx, 'DS')
+            dicom_tools.set_tag_value(ds, 'Rescale Slope', format(rescale_slope, '.10e'), frame.frame_idx, 'DS')
             dicom_tools.set_tag_value(ds, 'Series Number', str(series_number), frame.frame_idx, 'IS')
+            dicom_tools.set_tag_value(ds, 'Image Type', '["DERIVED", "PRIMARY"]', frame.frame_idx, 'IS')
+            ds.BitsStored = nb_bits_used
+            ds.BitsAllocated = nb_bits_used
+            ds.HighBit = nb_bits_used - 1
 
             if frame_coll.is_enhanced:
                 dicom_tools.set_tag_value(ds, 'Echo Time', 0., frame.frame_idx, 'FD')

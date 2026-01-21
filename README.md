@@ -26,6 +26,7 @@ The main differences between this project and the original one (available at [gi
 - PEP8 formatting + on its way to have sphinx compatible comments
 - added compatibility with latest pydicom version (3.0.1)
 - removed MatLab compatibility and obsolete ISMRM 2012 data (no longer available)
+- more precise output maps (that might result in a precision warning when opening the maps with a DICOM viewer, but the values are still more precise than when they were silently rounded in the script)
 
 
 HOW TO CITE
