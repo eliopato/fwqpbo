@@ -1,7 +1,8 @@
 import pydicom
 import numpy as np
-import dicom_tools
 import re
+import dicom_tools
+from dicom_tools import print_dt
 
 gyro = 42.576  # 1H gyromagnetic ratio
 
@@ -91,21 +92,21 @@ class FrameCollection():
         if num_tags['M'] == 0 and num_tags['P'] == 0:
             if num_tags['R'] > 0 and num_tags['R'] == num_tags['I']:
                 if print_type:
-                    print('Real/Imaginary images')
+                    print_dt('Real/Imaginary images')
                 return 'RI'
         else:    
             if num_tags['R'] == 0 and num_tags['I'] == 0 and num_tags['M'] == num_tags['P']:
                 if print_type:
-                    print('Magnitude/Phase images')
+                    print_dt('Magnitude/Phase images')
                 return 'MP'
             elif num_tags['M'] > 0 and num_tags['M'] == num_tags['R'] == num_tags['I']:
                 if num_tags['P'] == 0:
                     if print_type:
-                        print('Magnitude/Real/Imaginary images')
+                        print_dt('Magnitude/Real/Imaginary images')
                     return 'MRI'
                 elif num_tags['M'] == num_tags['P']:
                     if print_type:
-                        print('Magnitude/Phase/Real/Imaginary images')
+                        print_dt('Magnitude/Phase/Real/Imaginary images')
                     return 'MPRI'
         
         raise Exception(f'Unknown combination of image types: {num_tags}')
@@ -180,7 +181,7 @@ def read_input_images(data_param: dict):
         for i, frame in enumerate(frame_coll):
             z_slice = re.findall(r'.*_e0*[0-9]+_0*([0-9]+)\.dcm$', str(frame.path)) 
             if len(z_slice) != 1:
-                print('Error, couldnt determine slice index from dicom header nor file name. Please adapt the regex to your file names. Use file index.')
+                print_dt('Error, couldnt determine slice index from dicom header nor file name. Please adapt the regex to your file names. Use file index.')
                 frame.z_slice = (i % (n_slices))
             else:
                 n_slices = len(frame_coll.frame_list) // (frame_coll.n_echo * len(frame_coll.get_image_types()))
@@ -188,7 +189,7 @@ def read_input_images(data_param: dict):
 
     # select specified echoes from parameter file
     if 'echoes' in data_param:
-        print('dropping echoes...')
+        print_dt('dropping echoes...')
         frame_coll.echo_times = [frame_coll.echo_times[i] for i in data_param['echoes']]
     
     # check the number of echoes
@@ -199,12 +200,11 @@ def read_input_images(data_param: dict):
     frame_coll.t1 = ms_echo_times[0] 
     frame_coll.dt = np.mean(np.diff(ms_echo_times)) 
     if not 0.95 < np.max(np.diff(ms_echo_times))/frame_coll.dt < 1.05:
-        print('Warning: echo inter-spacing varies more than 5%')
-        print(frame_coll.echo_times)
+        print_dt('** Warning: echo inter-spacing varies more than 5%')
 
     # take all the slices if nothing is specified in the params
     if 'slice_list' in frame_coll.user_params:
-        print('selecting specified slices...')
+        print_dt('selecting specified slices...')
         frame_coll.select_frames(frame_coll.user_params['slice_list'])
 
     frame_coll.nx = frame_coll[0].get_attr('Columns')
@@ -227,7 +227,7 @@ def read_input_images(data_param: dict):
 
             frames = frame_coll.get_frames(z_index, echo_time)
             if len(frames) != len(img_types):
-                print(f'Error: You should have {len(img_types)} or frames for a given echo time/z_index for {img_types} images')
+                print_dt(f'Error: You should have {len(img_types)} or frames for a given echo time/z_index for {img_types} images')
                 continue
 
             n_frame = None
@@ -260,7 +260,7 @@ def read_input_images(data_param: dict):
             # Magnitude/phase images
             if img_types == 'MP':  
                 # we need to convert phase image from their original values ranges (e.g. [0:4095]) to [-pi:pi]. 
-                if ds.Manufacturer.startswith('Philips'):
+                if ds.Manufacturer.lower().startswith('philips'):
                     rescale_type = frames_data['P']['rescale_type']
                     if rescale_type is None or rescale_type == 'mrad':
                         pscale = 0.001
@@ -269,8 +269,8 @@ def read_input_images(data_param: dict):
                 else:
                     # 4096 comes from the max bits allocated that should be 12 (2^12 = 4096) - see dicom tag BitsAllocated
                     pscale = np.pi/4096
-                    if not ds.Manufacturer.startswith('Siemens'):
-                        print(f'Phase scaling value not specified for manufacturer {ds.Manufacturer}, using default (pi/4096)')
+                    if not ds.Manufacturer.lower().startswith('siemens'):
+                        print_dt(f'Phase scaling value not specified for manufacturer {ds.Manufacturer}, using default (pi/4096)')
 
                 magn_img = frames_data['M']['img'] * frames_data['M']['rescale_slope'] + frames_data['M']['rescale_intercept']
                 phase_img = frames_data['P']['img'] * frames_data['P']['rescale_slope'] + frames_data['P']['rescale_intercept']
@@ -310,11 +310,10 @@ def save(output: dict, frame_coll: FrameCollection) -> None:
         output[map_type] = np.moveaxis(output[map_type], 0, -1)
         out_dir = frame_coll.user_params['out_dir'] / map_type
         out_dir.mkdir(parents=True, exist_ok=True)
-        print(f'Writing images to {out_dir}')
 
-        print('> Saving DICOM map')
-        print(f'Map type: {map_type}')
-        print(f'Output directory: {out_dir}')
+        print_dt('> Saving DICOM map')
+        print_dt(f'Map type: {map_type}')
+        print_dt(f'Output directory: {out_dir}')
 
         series_description = map_params_dict[map_type]['descr']
         series_number = map_params_dict[map_type]['seriesNumber']

@@ -2,10 +2,12 @@ import thinqpbo as tq
 import numpy as np
 from skimage.filters import threshold_otsu
 from dicom_processing import FrameCollection
+from dicom_tools import print_dt
+
 gyro = 42.576
 
 
-def QPBO(D, Vx, Vy, Vz):
+def QPBO(D: np.array, Vx: np.array, Vy: np.array, Vz: np.array) -> np.array:
     graph = tq.QPBOFloat()
     nz, ny, nx = D.shape[1:]
     num_nodes = nz * ny *nx
@@ -62,10 +64,10 @@ def get_r2_residuals(Y: np.array, dB0: int, C, n_b0: int, n_r2: int, D=None):
     return J
 
 
-def icm(prev, L, max_icm_update, n_icm_iter, J, V, wx, wy, wz):
+def icm(prev: np.array, L: int, max_icm_update: int, n_icm_iter: int, J: np.array, V: np.array, wx: np.array, wy: np.array, wz: np.array) -> np.array:
     current = np.array(prev)
     for k in range(n_icm_iter):  # icm iterate
-        print(str(k+1), ', ', end='')
+        # print_dt(str(k+1))
         prev[:] = current[:]
         min_cost = np.full(current.shape, np.inf)
 
@@ -95,7 +97,7 @@ def find_minima(f):
 
 
 # In each voxel, find two smallest local residual minima in a period of omega
-def find_two_smallest_minima(J):
+def find_two_smallest_minima(J: np.array):
     A = np.zeros(J.shape[1:], dtype=int)
     B = np.zeros(J.shape[1:], dtype=int)
     for z in range(J.shape[1]):
@@ -159,7 +161,7 @@ def get_higher_level(level: dict):
     return high
 
 
-def get_high_level_residual_image(J, high, level: dict):
+def get_high_level_residual_image(J: np.array, high: dict, level: dict):
     Jhigh = np.zeros((J.shape[0], level['nz']+level['nz'] % high['sz'],
                                   level['ny']+level['ny'] % high['sy'],
                                   level['nx']+level['nx'] % high['sx']))
@@ -167,34 +169,33 @@ def get_high_level_residual_image(J, high, level: dict):
     return Jhigh.reshape((J.shape[0], high['nz'], high['sz'], high['ny'], high['sy'], high['nx'], high['sx'])).mean(axis=(2,4,6))
 
 
-def get_b0_from_high_level(dB0high, level: dict, high):
-    return np.repeat(np.repeat(np.repeat(dB0high, high['sx'], axis=2), high['sy'], axis=1), high['sz'], axis=0)[:level['nz'], :level['ny'], :level['nx']]
+def get_b0_from_high_level(dB0_high, level: dict, high):
+    return np.repeat(np.repeat(np.repeat(dB0_high, high['sx'], axis=2), high['sy'], axis=1), high['sz'], axis=0)[:level['nz'], :level['ny'], :level['nx']]
 
 
-def calculate_field_map(n_b0, level: dict, graph_cut_level, multiscale, max_icm_update,
-                        n_icm_iter, J, V, mu, offres_penalty=0, offres_center=0):
+def calculate_field_map(n_b0: int, level: dict, graph_cut_level, multiscale: bool, max_icm_update: int,
+                        n_icm_iter: int, J: np.array, V, mu: float, offres_penalty=0, offres_center=0) -> np.array:
     A, B = find_two_smallest_minima(J)
     dB0 = np.array(A)
 
     # Multiscale recursion
     if dB0.size == 1:  # Trivial case at coarsest level with only one voxel
-        print('Level (1, 1, 1): Trivial case')
+        print_dt('> Level (1, 1, 1): Trivial case')
         return dB0
 
     if multiscale:
         high = get_higher_level(level)
-        Jhigh = get_high_level_residual_image(J, high, level)
+        J_high = get_high_level_residual_image(J, high, level)
         # Recursion:
-        dB0high = calculate_field_map(n_b0, high, graph_cut_level, multiscale,
-                                    max_icm_update, n_icm_iter, Jhigh, V, mu,
-                                    offres_penalty, offres_center).reshape(
-                                    high['nz'], high['ny'], high['nx'])
-        dB0 = get_b0_from_high_level(dB0high, level, high)
-        print('Level ({},{},{}): '.format(
-            level['nx'], level['ny'], level['nz']))
+        dB0_high = calculate_field_map(n_b0, high, graph_cut_level, multiscale, 
+                                       max_icm_update, n_icm_iter, J_high, V, mu,
+                                       offres_penalty, offres_center)
+        dB0_high = dB0_high.reshape(high['nz'], high['ny'], high['nx'])
+        dB0 = get_b0_from_high_level(dB0_high, level, high)
+        print_dt(f"> Level ({level['nx']}, {level['ny']}, {level['nz']}): ")
 
     # Prepare MRF
-    print('Preparing MRF...', end='')
+    print_dt('Preparing MRF...')
     # Prepare discontinuity costs
     
     # 2nd derivative of residual function
@@ -213,8 +214,6 @@ def calculate_field_map(n_b0, level: dict, graph_cut_level, multiscale, max_icm_
     D = np.array([J[A.flatten(), vxls].reshape(A.shape) + OP[A],
                   J[B.flatten(), vxls].reshape(A.shape) + OP[B]])
     
-    print('DONE')
-
     # QPBO
     if graph_cut_level is not None:
         graphcut = level['L'] >= graph_cut_level
@@ -235,24 +234,22 @@ def calculate_field_map(n_b0, level: dict, graph_cut_level, multiscale, max_icm_
                         V[abs(B[:-1,:,:]-A[1:,:,:])],
                         V[abs(B[:-1,:,:]-B[1:,:,:])]])
 
-            print('Solving MRF using QPBO...', end='')
+            print_dt('Solving MRF using QPBO...')
             label = QPBO(D, Vx, Vy, Vz)
-            print('DONE')
 
             dB0[label == 0] = A[label == 0]
             dB0[label == 1] = B[label == 1]
 
     # icm
     if n_icm_iter > 0:
-        print('Solving MRF using icm...', end='')
+        print_dt('Solving MRF using icm...')
         dB0 = icm(dB0, n_b0, max_icm_update, n_icm_iter, J, V, wx, wy, wz)
-        print('DONE')
     return dB0
 
 
-# Calculate initial phase phi according to
-# Bydder et al. MRI 29 (2011): 216-221.
-def get_phi(Y, D):
+def get_phi(Y: np.array, D: np.array):
+    """ Calculate initial phase phi according to Bydder et al. MRI 29 (2011): 216-221.
+    Return a one dimension array of the length of the 2nd dimension of input array Y"""
     phi = np.zeros((Y.shape[1]))
     for i in range(Y.shape[1]):
         y = Y[:, i]
@@ -260,29 +257,29 @@ def get_phi(Y, D):
     return phi
 
 
-# Calculate phi, remove it from Y and return separate real and imag parts
-def get_real_demodulated(Y, D):
+def get_real_demodulated(Y: np.array, D: np.array):
+    """Calculate phi, remove it from Y and return separate real and imag parts"""
     phi = get_phi(Y, D)
     y = Y/np.exp(1j*phi)
     return np.concatenate((np.real(y), np.imag(y))), phi
 
 
-# Calculate LS error J as function of B0
-def get_b0_residuals(Y, C, n_b0, i_r2_cand, D=None):
+def get_b0_residuals(Y, C, n_b0, i_r2_cand, D=None) -> np.array:
+    """Calculate LS error J as function of B0"""
     J = np.zeros(shape=(n_b0, Y.shape[1], Y.shape[2], Y.shape[3], len(i_r2_cand)))
     for r in range(len(i_r2_cand)):
         for b in range(n_b0):
             if not D:  # complex-valued estimates
                 y = Y
             else:  # real-valued estimates
-                y, phi = get_real_demodulated(Y, D[r][b])
+                y, _ = get_real_demodulated(Y, D[r][b])
             J[b, :, :, :, r] = np.linalg.norm(np.tensordot(C[i_r2_cand[r]][b], y, axes=(1,0)), axis=0)**2
     J = np.min(J, axis=4) # minimum over R2* candidates
     return J
 
 
-# Construct modulation vectors for each B0 value
-def modulation_vectors(n_b0, N):
+def modulation_vectors(n_b0: int, N: int):
+    """Construct modulation vectors for each B0 value"""
     B, Bh = [], []
     for b in range(n_b0):
         omega = 2.*np.pi*b/n_b0
@@ -293,8 +290,8 @@ def modulation_vectors(n_b0, N):
     return B, Bh
 
 
-# Construct matrix RA
 def model_matrix(frame_coll: FrameCollection, model_param: dict, R2) -> np.array:
+    """Construct matrix RA"""
     RA = np.zeros(shape=(frame_coll.n_echo, model_param['M']), dtype=complex)
     for n in range(frame_coll.n_echo):
         t = frame_coll.t1 + n * frame_coll.dt
@@ -308,7 +305,7 @@ def model_matrix(frame_coll: FrameCollection, model_param: dict, R2) -> np.array
 
 # Get matrix Dtmp defined so that D = Bconj*Dtmp*Bh
 # Following Bydder et al. MRI 29 (2011): 216-221.
-def get_dtmp(A):
+def get_dtmp(A: np.array):
     Ah = A.conj().T
     inv = np.linalg.inv(np.real(np.dot(Ah, A)))
     Dtmp = np.dot(A.conj(), np.dot(inv, Ah))
@@ -316,14 +313,14 @@ def get_dtmp(A):
 
 
 # Separate and concatenate real and imag parts of complex matrix M
-def realify(M):
+def realify(M: np.array):
     R = np.real(M)
     I = np.imag(M)
     return np.concatenate((np.concatenate((R, I)), np.concatenate((-I, R))), 1)
 
 
 # Get mean square signal magnitude within foreground
-def get_mean_energy(Y):
+def get_mean_energy(Y: np.array):
     energy = np.linalg.norm(Y, axis=0)**2
     thres = threshold_otsu(energy)
     return np.mean(energy[energy >= thres])
@@ -351,6 +348,8 @@ def reconstruct(frame_coll: FrameCollection, algo_param: dict, model_param: dict
         Y = frame_coll.img[:, selected_slices, :, :]
         nz = len(selected_slices)
 
+    print_dt('Preparing matrices')
+
     # Prepare matrices
     # Off-resonance modulation vectors (one for each off-resonance value)
     B, Bh = modulation_vectors(algo_param['n_b0'], frame_coll.n_echo)
@@ -358,6 +357,8 @@ def reconstruct(frame_coll: FrameCollection, algo_param: dict, model_param: dict
     D = None
     if algo_param['real_estimates']:
         D = []  # Matrix for calculating phi (needed for real-valued estimates)
+
+    print_dt('Preparing matrices - step 1')
     for r in range(algo_param['n_r2']):
         R2 = r*algo_param['r2_step']
         RA.append(model_matrix(frame_coll, model_param, R2))
@@ -370,9 +371,12 @@ def reconstruct(frame_coll: FrameCollection, algo_param: dict, model_param: dict
         RAp.append(np.linalg.pinv(RA[r]))
 
     if algo_param['real_estimates']:
+        print('Real estimates')
         for b in range(algo_param['n_b0']):
             B[b] = realify(B[b])
             Bh[b] = realify(Bh[b])
+
+    print_dt('Preparing matrices - step 2')
     for r in range(algo_param['n_r2']):
         C.append([])
         Qp.append([])
@@ -383,8 +387,9 @@ def reconstruct(frame_coll: FrameCollection, algo_param: dict, model_param: dict
             Qp[r].append(np.dot(RAp[r], Bh[b]))
 
     # For B0 index -> off-resonance in ppm
-    B0step = 1.0/algo_param['n_b0']/np.abs(frame_coll.dt)/gyro/frame_coll.b0
+    b0_step = 1.0/algo_param['n_b0']/np.abs(frame_coll.dt)/gyro/frame_coll.b0
     if dermine_b0:
+        print_dt('Determine B0')
         V = []  # Precalculate discontinuity costs
         for b in range(algo_param['n_b0']):
             V.append(min(b**2, (b-algo_param['n_b0'])**2))
@@ -397,21 +402,25 @@ def reconstruct(frame_coll: FrameCollection, algo_param: dict, model_param: dict
         
         J = get_b0_residuals(Y, C, algo_param['n_b0'], algo_param['i_r2_cand'], D)
         offres_penalty = algo_param['offres_penalty']
-        if algo_param['offres_penalty'] > 0:
+        if offres_penalty > 0:
             offres_penalty *= get_mean_energy(Y)
 
         dB0 = calculate_field_map(algo_param['n_b0'], level, algo_param['graph_cut_level'],
                                   algo_param['multiscale'], algo_param['max_icm_update'],
                                   algo_param['n_icm_iter'], J, V, algo_param['mu'],
-                                  offres_penalty, int(frame_coll.user_params['offres_center']/B0step))
+                                  offres_penalty, int(frame_coll.user_params['offres_center']/b0_step))
+        print_dt('done dermining B0')
+
     elif b0_map is None:
         dB0 = np.zeros(Y.shape[1:], dtype=int)
     else:
-        dB0 = np.array(b0_map/B0step, dtype=int)
+        dB0 = np.array(b0_map/b0_step, dtype=int)
 
     if dermine_r2:
+        print_dt('Determining R2...')
         J = get_r2_residuals(Y, dB0, C, algo_param['n_b0'], algo_param['n_r2'], D)
         R2 = np.argmin(J, axis=0) # brute force minimization
+        print_dt('done dermining R2')
     elif r2_map is None:
         R2 = np.zeros(Y.shape[1:], dtype=int)
     else:
@@ -419,6 +428,7 @@ def reconstruct(frame_coll: FrameCollection, algo_param: dict, model_param: dict
 
     # Find least squares solution given dB0 and R2
     rho = np.zeros(shape=(model_param['M'], nz, frame_coll.ny, frame_coll.nx), dtype=complex)
+    print_dt('Find least squares solution given dB0 and R2...')
     for r in range(algo_param['n_r2']):
         for b in range(algo_param['n_b0']):
             vxls = (dB0 == b)*(R2 == r)
@@ -441,6 +451,6 @@ def reconstruct(frame_coll: FrameCollection, algo_param: dict, model_param: dict
         r2_map[:] = R2*algo_param['r2_step']
 
     if dermine_b0:
-        b0_map[:] = dB0*B0step
-
+        b0_map[:] = dB0*b0_step
+    print_dt('end reconstruct')
     return rho, b0_map, r2_map

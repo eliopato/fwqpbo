@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 
 import numpy as np
+import datetime
 import sys
 import optparse
 import config
 import fat_water_separation
 import dicom_processing
-from dicom_tools import get_slabs
+from dicom_tools import get_slabs, print_dt
 
 
 # Merge output for slices/slabs reconstructed separately
@@ -56,6 +57,11 @@ def reconstruct(frame_coll: dicom_processing.FrameCollection, algo_param: dict, 
     """Perform fat/water separation and return prescribed output.
     The output is a dict where keys are map names, and values are the numpy array images."""
 
+    if selected_slices is None:
+        print_dt('Start reconstruction')
+    else:
+        print_dt(f'Start reconstruction of slices {selected_slices}')
+
     # Do the fat/water separation
     rho, b0_map, r2_map = fat_water_separation.reconstruct(frame_coll, algo_param, model_param, selected_slices=selected_slices)
     wat = rho[0]
@@ -85,6 +91,7 @@ def reconstruct(frame_coll: dicom_processing.FrameCollection, algo_param: dict, 
 
     # Do any Fatty Acid Composition in a second pass
     if model_param['n_fac'] > 0:
+        print_dt('Start Fatty Acid Composition ')
         rho = fat_water_separation.reconstruct(frame_coll, algo_param['pass2'], model_param['pass2'], b0_map, r2_map, selected_slices=selected_slices)[0]
         CL, UD, PUD = get_fatty_acid_composition(rho)
     
@@ -99,12 +106,14 @@ def reconstruct(frame_coll: dicom_processing.FrameCollection, algo_param: dict, 
 
 
 def main(data_param_filepath: str, algo_param_filepath: str, model_param_filepath: str, out_dir=None):
-    # Read configuration files
+    start_time = datetime.datetime.now()
+    print_dt('Reading config files')
     data_param = config.read_configfile(data_param_filepath)
     algo_param = config.read_configfile(algo_param_filepath)
     model_param = config.read_configfile(model_param_filepath)
 
     # setup data params and read input images
+    print_dt('Reading input images')
     frame_coll = config.setup_data_params(data_param, out_dir)
     frame_coll = dicom_processing.read_input_images(data_param)    
     if 'slabs_size' in frame_coll.user_params:
@@ -114,11 +123,11 @@ def main(data_param_filepath: str, algo_param_filepath: str, model_param_filepat
     config.setup_model_params(model_param, data_param['clockwise_precession'], data_param['temperature'])
     config.setup_algo_params(algo_param, frame_coll.n_echo, model_param['n_fac'])
 
-    print(f'B0 = {round(frame_coll.b0, 2)}')
-    print(f'N echoes = {frame_coll.n_echo}')
-    print(f't1/dt = {round(frame_coll.t1*1000, 2)}/{round(frame_coll.dt*1000, 2)} msec')
-    print(f'nx,ny,nz = {frame_coll.nx}, {frame_coll.ny}, {frame_coll.n_slice_indexes}')
-    print(f'dx,dy,dz = {round(frame_coll.dx, 2)}, {round(frame_coll.dy, 2)}, {round(frame_coll.dz, 2)}')
+    print_dt(f'B0 = {round(frame_coll.b0, 2)}')
+    print_dt(f'N echoes = {frame_coll.n_echo} ({frame_coll.echo_times})')
+    print_dt(f't1/dt = {round(frame_coll.t1*1000, 2)}/{round(frame_coll.dt*1000, 2)} msec')
+    print_dt(f'nx,ny,nz = {frame_coll.nx}, {frame_coll.ny}, {frame_coll.n_slice_indexes}')
+    print_dt(f'dx,dy,dz = {round(frame_coll.dx, 2)}, {round(frame_coll.dy, 2)}, {round(frame_coll.dz, 2)}')
 
     # Run fat/water processing and save output
     
@@ -127,11 +136,11 @@ def main(data_param_filepath: str, algo_param_filepath: str, model_param_filepat
         
         if 'slabs' in frame_coll.user_params: 
             for n_slab, (slices, _) in enumerate(frame_coll.user_params['slabs']):
-                print(f'Processing slab {n_slab+1}/{len(frame_coll.user_params['slabs'])} (slices {slices[0]+1}-{slices[-1]+1})...')
+                print_dt(f'Processing slab {n_slab+1}/{len(frame_coll.user_params['slabs'])} (slices {slices[0]+1}-{slices[-1]+1})...')
                 output.append(reconstruct(frame_coll, algo_param, model_param, selected_slices=slices))
         elif not algo_param['use_3D']:
             for z_slice in frame_coll.slice_indexes:
-                print(f'Processing slice {z_slice+1}/{frame_coll.n_slice_indexes}...')
+                print_dt(f'Processing slice {z_slice+1}/{frame_coll.n_slice_indexes}...')
                 output.append(reconstruct(frame_coll, algo_param, model_param, selected_slices=[z_slice]))
         else:
             raise Exception('Error: cant do slab processing if use_3D is set to False, please update the data_params.yml file')
@@ -141,6 +150,7 @@ def main(data_param_filepath: str, algo_param_filepath: str, model_param_filepat
         output = reconstruct(frame_coll, algo_param, model_param)
 
     dicom_processing.save(output, frame_coll)
+    print(f'Total run time: {datetime.datetime.now() - start_time}')
         
 
 

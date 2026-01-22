@@ -3,6 +3,7 @@ from pathlib import Path
 import yaml
 import dicom_tools
 
+
 # Update algorithm parameter object algo_param and set default parameters
 def setup_algo_params(algo_param, N, n_fac=0):
 

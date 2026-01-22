@@ -2,14 +2,9 @@ import pydicom
 import datetime
 import numpy as np
 
-# from https://github.com/rordenlab/dcm2niix/blob/master/Philips/README.md
-#  WS = RealWorldValue slope (0040,9225) "PhilipsRWVSlope"
-#  WI = RealWorldValue intercept (0040,9224) "PhilipsRWVIntercept"
-#  RS = rescale slope (0028,1053) "PhilipsRescaleSlope"
-#  RI = rescale intercept (0028,1052) "PhilipsRescaleIntercept"
-#  SS = scale slope (2005,100E) "PhilipsScaleSlope"
-
-
+def print_dt(message):
+    print(f'{datetime.datetime.now().strftime("%H:%M:%S")} - {message}')
+    
 # List of DICOM attributes required for the water-fat separation
 # don't chang the order of the attributes as it would affect the whole processing
 req_attributes = ['Image Type', 
@@ -151,7 +146,7 @@ def get_valid_files(files):
         try:
             ds = pydicom.dcmread(str(file), stop_before_pixels=True)
         except:
-            print(f'Could not read file: {file}')
+            print_dt(f'Could not read file: {file}')
             continue
 
         multiframe = is_enhanced(ds)
@@ -159,10 +154,10 @@ def get_valid_files(files):
         has_required_attrs = [attr_in_dataset(ds, attr, multiframe) for attr in req_attributes]
         
         if not all(has_required_attrs):
-            print(f'File {file} is missing required DICOM tags:')
+            print_dt(f'File {file} is missing required DICOM tags:')
             for i, has_attr in enumerate(has_required_attrs):
                 if not has_attr:
-                    print(req_attributes[i])
+                    print_dt(req_attributes[i])
             continue
         else:
             valid_files.append(file)
@@ -185,12 +180,11 @@ def get_series_instance_uid(data_param, series_description):
     return data_param['seriesInstanceUIDs'][series_description]
 
 
-
-# Sets DICOM element value in dataset ds at tag=key. Use frame for multiframe
-# DICOM files. If missing tag, a new one is created if value representation VR
-# is provided
-def set_tag_value(ds: pydicom.Dataset, key: str, val, frame=None, VR=None):
-
+def set_tag_value(ds: pydicom.Dataset, key: str, val, frame=None, VR=None) -> bool:
+    """Sets DICOM element value in dataset ds at tag=key. Use frame for multiframe
+    DICOM files. If missing tag, a new one is created if value representation VR
+    is provided.
+    Return True if setting the tag succeded, False otherwise"""
     key_id = tag_dict[key]
 
     # existing tag, update it
@@ -198,43 +192,45 @@ def set_tag_value(ds: pydicom.Dataset, key: str, val, frame=None, VR=None):
 
         if key_id in ds:
             ds[key_id].value = val
+            if VR is not None:
+                ds[key_id].VR = VR
             return True
-        elif frame is not None:
-            if key_id in ds:
-                ds[key_id].value = val
-            else:
-                frame_ds = ds[tag_dict['Frame sequence']].value[frame]
-                
-                # Philips(?) private tag containing frame tags
-                if 0x2005140f in frame_ds:   
-                    frame_ds = frame_ds[0x2005140f][0]
+        
+        if frame is not None:            
+            frame_ds = ds[tag_dict['Frame sequence']].value[frame]
+            
+            # Philips(?) private tag containing frame tags
+            if 0x2005140f in frame_ds:   
+                frame_ds = frame_ds[0x2005140f][0]
 
-                if key_id in frame_ds:
-                    frame_ds[key_id].value = val
-                elif key == 'Echo Time':
-                    frame_ds.MREchoSequence[0].EffectiveEchoTime = val
-                elif key == 'Image Type':
-                    frame_ds.MRImageFrameTypeSequence[0].FrameType[2] = val
-                elif key == 'Slice Location':
-                    frame_ds.PlanePositionSequence[0].ImagePositionPatient[2] = val
-                elif key == 'Imaging Frequency':
-                    frame_ds = ds.SharedFunctionalGroupsSequence[0]
-                    frame_ds.MRImagingModifierSequence[0].TransmitterFrequency = val 
-                elif key == 'Pixel Spacing':
-                    frame_ds.PixelMeasuresSequence[0].PixelSpacing  = val
-                elif key == 'Spacing Between Slices':
-                    frame_ds.PixelMeasuresSequence[0].SliceThickness = val
-                elif key == 'Rescale Intercept':
-                    frame_ds.PixelValueTransformationSequence[0].RescaleIntercept = val
-                elif key == 'Rescale Slope':
-                    frame_ds.PixelValueTransformationSequence[0].RescaleSlope = val
-                elif key == 'Window Center':
-                    frame_ds.FrameVOILUTSequence[0].WindowCenter = val
-                elif key == 'Window Width':
-                    frame_ds.FrameVOILUTSequence[0].WindowWidth = val
-                else:
-                    print(f'WARNING: Tag {key} with id {key_id} has no set method, please define it')
-                    return False
+            if key_id in frame_ds:
+                frame_ds[key_id].value = val
+                if VR is not None:
+                    frame_ds[key_id].VR = VR
+            elif key == 'Echo Time':
+                frame_ds.MREchoSequence[0].EffectiveEchoTime = val
+            elif key == 'Image Type':
+                frame_ds.MRImageFrameTypeSequence[0].FrameType[2] = val
+            elif key == 'Slice Location':
+                frame_ds.PlanePositionSequence[0].ImagePositionPatient[2] = val
+            elif key == 'Imaging Frequency':
+                frame_ds = ds.SharedFunctionalGroupsSequence[0]
+                frame_ds.MRImagingModifierSequence[0].TransmitterFrequency = val 
+            elif key == 'Pixel Spacing':
+                frame_ds.PixelMeasuresSequence[0].PixelSpacing  = val
+            elif key == 'Spacing Between Slices':
+                frame_ds.PixelMeasuresSequence[0].SliceThickness = val
+            elif key == 'Rescale Intercept':
+                frame_ds.PixelValueTransformationSequence[0].RescaleIntercept = val
+            elif key == 'Rescale Slope':
+                frame_ds.PixelValueTransformationSequence[0].RescaleSlope = val
+            elif key == 'Window Center':
+                frame_ds.FrameVOILUTSequence[0].WindowCenter = val
+            elif key == 'Window Width':
+                frame_ds.FrameVOILUTSequence[0].WindowWidth = val
+            else:
+                print_dt(f'** Warning: Tag {key} with id {key_id} has no set method, please define it')
+                return False
             return True
         else:
             return False
@@ -245,7 +241,7 @@ def set_tag_value(ds: pydicom.Dataset, key: str, val, frame=None, VR=None):
         first_level_keys = ['SOP Instance UID', 'Series Instance UID', 'Protocol Name',
                             'Series Description', 'Smallest Pixel Value', 'Largest Pixel Value']
         if frame is None or key in first_level_keys:
-            ds.add_new(key_id, val, VR)
+            ds.add_new(key_id, VR, val)
             return True
         else:
             frame_ds = ds[tag_dict['Frame sequence']].value[frame]
@@ -256,10 +252,10 @@ def set_tag_value(ds: pydicom.Dataset, key: str, val, frame=None, VR=None):
 
             # if key == 'Echo Time':
             #     frame_ds = frame_ds.MREchoSequence[0]   
-            #     frame_ds.add_new('EffectiveEchoTime', val, VR)
+            #     frame_ds.add_new('EffectiveEchoTime', VR, val)
             # elif key == 'Image Type':
             #     frame_ds = frame_ds.MRImageFrameTypeSequence[0]
-            #     frame_ds.add_new('FrameType', val, VR)
+            #     frame_ds.add_new('FrameType', VR, val)
             # elif key == 'Slice Location':
             #     frame_ds.PlanePositionSequence[0].ImagePositionPatient[2] = val
             # elif key == 'Imaging Frequency':
@@ -281,7 +277,7 @@ def set_tag_value(ds: pydicom.Dataset, key: str, val, frame=None, VR=None):
             #     return False
             # return True
         
-    print(f'Warning: DICOM tag {key} was not set')
+    print_dt(f'** Warning: DICOM tag {key} was not set')
     return False
 
 
