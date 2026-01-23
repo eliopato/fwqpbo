@@ -2,7 +2,8 @@ import pydicom
 import datetime
 import numpy as np
 
-def print_dt(message):
+def print_dt(message: str) -> None:
+    """add the hour/minute seconds before printing the message"""
     print(f'{datetime.datetime.now().strftime("%H:%M:%S")} - {message}')
     
 # List of DICOM attributes required for the water-fat separation
@@ -127,8 +128,8 @@ def attr_in_dataset(ds, attr, is_enhanced):
     return False
 
 
-# Check if ds is a multiframe DICOM object
 def is_enhanced(ds):
+    """Check if ds is a multiframe DICOM object"""
     if tag_dict['Number of frames'] in ds:
         if tag_dict['Frame sequence'] in ds:
             if int(ds[tag_dict['Number of frames']].value) > 1:
@@ -281,8 +282,8 @@ def set_tag_value(ds: pydicom.Dataset, key: str, val, frame=None, VR=None) -> bo
     return False
 
 
-# group slices in slice_list in slabs of slabs_size contiguous slices
 def get_slabs(slice_list: list[int], slabs_size: int):
+    """group slices in slice_list in slabs of slabs_size contiguous slices"""
     slabs = []
     slices = []
     pos = 0

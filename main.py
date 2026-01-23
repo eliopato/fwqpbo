@@ -10,8 +10,9 @@ import dicom_processing
 from dicom_tools import get_slabs, print_dt
 
 
-# Merge output for slices/slabs reconstructed separately
-def merged_output_slices(output_list):
+def merged_output_slices(output_list: list) -> dict:
+    """Merge output for slices/slabs reconstructed separately
+    Return a dict with the numpy array for each image type (ff, water, etc)"""
     merged_output = output_list[0]
     for output in output_list[1:]:
         for series_type in output:
@@ -19,7 +20,8 @@ def merged_output_slices(output_list):
     return merged_output
 
 
-def get_fatty_acid_composition(rho):
+def get_fatty_acid_composition(rho: list) -> tuple[float, float, float]:
+    """calculate UD, UD and PUD or UD, PUD and CL dependant on the number of fatty acid components (length(rho) -2)"""
     n_fac = len(rho) - 2 # Number of Fatty Acid Composition Parameters
     eps = sys.float_info.epsilon
     CL, UD, PUD = None, None, None
@@ -45,8 +47,8 @@ def get_fatty_acid_composition(rho):
     return CL, UD, PUD
 
 
-# Get total fat component (for Fatty Acid Composition; trivial otherwise)
-def get_fat(rho, alpha):
+def get_fat(rho, alpha) -> np.array:
+    """Get total fat component (for Fatty Acid Composition; trivial otherwise)"""
     fat = np.zeros(rho.shape[1:], dtype=complex)
     for m in range(1, alpha.shape[0]):
         fat += sum(alpha[m, 1:])*rho[m]
@@ -105,16 +107,17 @@ def reconstruct(frame_coll: dicom_processing.FrameCollection, algo_param: dict, 
     return output
 
 
-def main(data_param_filepath: str, algo_param_filepath: str, model_param_filepath: str, out_dir=None):
+def main(data_param_filepath: str, algo_param_filepath: str, model_param_filepath: str):
     start_time = datetime.datetime.now()
     print_dt('Reading config files')
     data_param = config.read_configfile(data_param_filepath)
+    config.setup_data_params(data_param)
     algo_param = config.read_configfile(algo_param_filepath)
     model_param = config.read_configfile(model_param_filepath)
 
     # setup data params and read input images
     print_dt('Reading input images')
-    frame_coll = config.setup_data_params(data_param, out_dir)
+    
     frame_coll = dicom_processing.read_input_images(data_param)    
     if 'slabs_size' in frame_coll.user_params:
         frame_coll.user_params['slabs'] = get_slabs(frame_coll.slice_indexes, data_param['slabs_size'])

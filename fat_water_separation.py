@@ -51,8 +51,8 @@ def QPBO(D: np.array, Vx: np.array, Vy: np.array, Vz: np.array) -> np.array:
     return label.reshape((nz, ny, nx))
 
 
-# Calculate LS error J as function of R2*
 def get_r2_residuals(Y: np.array, dB0: int, C, n_b0: int, n_r2: int, D=None):
+    """Calculate LS error J as function of R2*"""
     J = np.zeros(shape=(n_r2, Y.shape[1], Y.shape[2], Y.shape[3]))
     for b in range(n_b0):
         for r in range(n_r2):
@@ -91,13 +91,13 @@ def icm(prev: np.array, L: int, max_icm_update: int, n_icm_iter: int, J: np.arra
     return current
 
 
-# Find all local minima of discretely evaluated function f(t) with period T
 def find_minima(f): 
+    """Find all local minima of discretely evaluated function f(t) with period T"""
     return np.where((f < np.roll(f, 1))*(f < np.roll(f, -1)))[0]
 
 
-# In each voxel, find two smallest local residual minima in a period of omega
 def find_two_smallest_minima(J: np.array):
+    """In each voxel, find two smallest local residual minima in a period of omega"""
     A = np.zeros(J.shape[1:], dtype=int)
     B = np.zeros(J.shape[1:], dtype=int)
     for z in range(J.shape[1]):
@@ -113,15 +113,13 @@ def find_two_smallest_minima(J: np.array):
     return A, B
 
 
-# 2D measure of isotropy defined as
-# the square area over the square perimeter (area normalized to 1)
 def isotropy_2d(dx, dy): 
+    """2D measure of isotropy defined as the square area over the square perimeter (area normalized to 1)"""
     return np.sqrt(dx*dy)/(2*(dx+dy))
 
 
-# 3D measure of isotropy defined as
-# the cube volume over the cube area (volume normalized to 1)
 def isotropy_3d(dx, dy, dz): 
+    """3D measure of isotropy defined as the cube volume over the cube area (volume normalized to 1)"""
     return (dx*dy*dz)**(2/3)/(2*(dx*dy+dx*dz+dy*dz))
 
 
@@ -303,30 +301,29 @@ def model_matrix(frame_coll: FrameCollection, model_param: dict, R2) -> np.array
     return RA
 
 
-# Get matrix Dtmp defined so that D = Bconj*Dtmp*Bh
-# Following Bydder et al. MRI 29 (2011): 216-221.
 def get_dtmp(A: np.array):
+    """Get matrix Dtmp defined so that D = Bconj*Dtmp*Bh 
+    Following Bydder et al. MRI 29 (2011): 216-221."""
     Ah = A.conj().T
     inv = np.linalg.inv(np.real(np.dot(Ah, A)))
     Dtmp = np.dot(A.conj(), np.dot(inv, Ah))
     return Dtmp
 
 
-# Separate and concatenate real and imag parts of complex matrix M
 def realify(M: np.array):
+    """Separate and concatenate real and imag parts of complex matrix M"""
     R = np.real(M)
     I = np.imag(M)
     return np.concatenate((np.concatenate((R, I)), np.concatenate((-I, R))), 1)
 
 
-# Get mean square signal magnitude within foreground
 def get_mean_energy(Y: np.array):
+    """Get mean square signal magnitude within foreground"""
     energy = np.linalg.norm(Y, axis=0)**2
     thres = threshold_otsu(energy)
     return np.mean(energy[energy >= thres])
 
 
-# Perform the actual reconstruction
 def reconstruct(frame_coll: FrameCollection, algo_param: dict, model_param: dict, b0_map=None, r2_map=None, selected_slices: None|list[int]=None):
     """Perform the water/fat separation
     :params frame_coll: object containing the input volume information

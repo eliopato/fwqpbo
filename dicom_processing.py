@@ -144,9 +144,8 @@ def type_tag_to_type(tag_value):
     return None
 
 
-# update data_param with info retrieved from the DICOM files including image data
 def read_input_images(data_param: dict):
-
+    """update data_param with info retrieved from the DICOM files including image data"""
     # define if multiframe
     ds = pydicom.dcmread(str(data_param['files'][0]), stop_before_pixels=True)
     frame_coll = FrameCollection(dicom_tools.is_enhanced(ds), data_param)
@@ -294,7 +293,7 @@ def read_input_images(data_param: dict):
 
     return frame_coll
 
-# Save all data in output as DICOM images
+
 def save(output: dict, frame_coll: FrameCollection) -> None:
     """ Save numpy array to DICOM image."""
 
@@ -381,5 +380,3 @@ def pad_cropped(cropped_image: np.array, frame_coll: FrameCollection) -> tuple[n
         return image, frame_coll.Nx, frame_coll.Ny
     else:
         return cropped_image, frame_coll.nx, frame_coll.ny
-
-

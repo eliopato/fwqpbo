@@ -4,9 +4,8 @@ import yaml
 import dicom_tools
 
 
-# Update algorithm parameter object algo_param and set default parameters
 def setup_algo_params(algo_param, N, n_fac=0):
-
+    """Update algorithm parameter object algo_param and set default parameters"""
     defaults = [
         ('n_r2', 1),
         ('r2_max', 100.),
@@ -73,8 +72,8 @@ def setup_algo_params(algo_param, N, n_fac=0):
         algo_param['output'].append('UD')
 
 
-# Get relative weights alpha of fat resonances based on CL, UD, and PUD per UD
 def get_fac_alphas(CL = None, P2U = None, UD = None):
+    """Get relative weights alpha of fat resonances based on CL, UD, and PUD per UD"""
     P = 11  # Expects one water and ten triglyceride resonances
     M = [CL, UD, P2U].count(None)+2
     alpha = np.zeros([M, P], dtype=np.float32)
@@ -107,9 +106,8 @@ def get_fac_alphas(CL = None, P2U = None, UD = None):
     return alpha
 
 
-# Update model parameter object model_param and set default parameters
 def setup_model_params(model_param, clockwise_precession=False, temperature=None):
-
+    """Update model parameter object model_param and set default parameters"""
     defaults = [
         ('fat_cs', [1.3]),
         ('n_fac', 0),
@@ -167,11 +165,9 @@ def setup_model_params(model_param, clockwise_precession=False, temperature=None
         model_param['M'] = model_param['alpha'].shape[0]
 
     
-# Update data param object, set default parameters and read data from files
-def setup_data_params(data_param: dict, out_dir:str|None=None):
-    if out_dir:
-        data_param['out_dir'] = Path(out_dir)
-    elif 'out_dir' in data_param:
+def setup_data_params(data_param: dict) -> None:
+    """Update data param object, set default parameters and read data from files"""
+    if 'out_dir' in data_param:
         data_param['out_dir'] = Path(data_param['out_dir'])
     else:
         raise Exception('No out_dir defined')
