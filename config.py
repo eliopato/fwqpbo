@@ -1,7 +1,7 @@
 import numpy as np
 from pathlib import Path
 import yaml
-import dicom_tools
+import tools
 
 
 def setup_algo_params(algo_param, N, n_fac=0):
@@ -59,11 +59,11 @@ def setup_algo_params(algo_param, N, n_fac=0):
         algo_param['pass2']['graph_cut_level'] = None  # to omit the graphcut
         algo_param['pass2']['graphcut'] = False
     
-    algo_param['output'] = ['wat', 'fat', 'ff', 'b0_map']
+    algo_param['output'] = ['wat', 'fat', 'ff', 'b0']
     if algo_param['real_estimates']:
         algo_param['output'].append('phi')
     if (algo_param['n_r2'] > 1):
-        algo_param['output'].append('r2_map')
+        algo_param['output'].append('r2')
     if (n_fac > 2):
         algo_param['output'].append('CL')
     if (n_fac > 1):
@@ -123,6 +123,7 @@ def setup_model_params(model_param, clockwise_precession=False, temperature=None
     if 'wat_cs' not in model_param:
         if temperature: # Temperature dependence according to Hernando 2014
             model_param['wat_cs'] = 1.3 + 3.748 -.01085 * temperature # Temp in [°C]
+            tools.print_dt(f'Calculated water chemical shift accounting for temperature ({temperature}°C) is {model_param["wat_cs"]}')
         else:
             model_param['wat_cs'] = 4.7
     
@@ -134,7 +135,7 @@ def setup_model_params(model_param, clockwise_precession=False, temperature=None
     model_param['P'] = len(model_param['CS'])
 
     if model_param['n_fac'] > 0 and model_param['P'] != 11:
-        raise Exception('FAC excpects exactly one water and ten triglyceride resonances')
+        raise Exception('FAC expects exactly one water and ten triglyceride resonances')
     
     model_param['M'] = 2 + model_param['n_fac']
 
@@ -165,12 +166,12 @@ def setup_model_params(model_param, clockwise_precession=False, temperature=None
         model_param['M'] = model_param['alpha'].shape[0]
 
     
-def setup_data_params(data_param: dict) -> None:
+def detect_valid_files(data_param: dict) -> dict:
     """Update data param object, set default parameters and read data from files"""
     if 'out_dir' in data_param:
         data_param['out_dir'] = Path(data_param['out_dir'])
     else:
-        raise Exception('No out_dir defined')
+        raise Exception('Parameter out_dir not defined')
 
     defaults = [
         ('rescale', 1.0),
@@ -184,20 +185,23 @@ def setup_data_params(data_param: dict) -> None:
         if param not in data_param:
             data_param[param] = defval
 
-    if 'files' in data_param:
-        data_param['files'] = [data_param['config_path'] / file for file in list(data_param['files']) if Path(data_param['config_path'] / file).is_file()]
+    if 'files' in data_param and data_param['files']:
+        data_param['files'] = [Path(file) for file in data_param['files'] if Path(file).is_file()]
     
-    if 'dirs' in data_param:
-        data_param['dirs'] = [data_param['config_path'] / dir for dir in list(data_param['dirs']) if Path(data_param['config_path'] / dir).is_dir()]
+    if 'dirs' in data_param and data_param['dirs']:
+        data_param['dirs'] = [Path(dir) for dir in data_param['dirs'] if Path(dir).is_dir()]
         for path in data_param['dirs']:
             data_param['files'] += [obj for obj in path.iterdir() if obj.is_file()]
-    
-    valid_files = dicom_tools.get_valid_files(data_param['files'])
+
+    valid_files = tools.get_valid_files(data_param['files'])
     
     if not valid_files:
-        raise Exception('No valid files found')
+        print('ERROR : no valid files found')
+        return None
     
     data_param['files'] = valid_files
+
+    return data_param
 
 
 def read_configfile(file: str) -> dict:
@@ -211,5 +215,14 @@ def read_configfile(file: str) -> dict:
     # if the config file doesn't include any value
     if config is None:
         config = dict()
-    config['config_path'] = file.parent
     return config
+
+
+def set_default(default_params: dict, user_params: dict) -> dict:
+    """Add any missing keys from user_params dict with keys and values from default_params. 
+    Return a new dict"""
+    output_dict = dict(user_params) # copy dict
+    for key, value in default_params.items():
+        if key not in output_dict:
+            output_dict[key] = value
+    return output_dict

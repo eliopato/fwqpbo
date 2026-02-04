@@ -1,0 +1,19 @@
+default:
+  n_r2: 145
+  r2_max: 144.0
+  r2_cand: [40.]
+  mu: 0.1
+  n_b0: 100
+  n_icm_iter: 10
+  graphcut: True
+  multiscale: True
+  use_3D: True
+  magnitude_discrimination: False
+
+2D:
+  use_3D: False
+  
+CREAM:
+  n_r2: 101
+  r2_max: 100
+  n_b0: 481

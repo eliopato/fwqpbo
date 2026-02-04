@@ -1,11 +1,98 @@
 import thinqpbo as tq
 import numpy as np
+import sys
 from skimage.filters import threshold_otsu
 from dicom_processing import FrameCollection
-from dicom_tools import print_dt
+from tools import print_dt
 
 gyro = 42.576
 
+
+def get_fatty_acid_composition(rho: list) -> tuple[float, float, float]:
+    """calculate UD, UD and PUD or UD, PUD and CL dependant on the number of fatty acid components (length(rho) -2)"""
+    n_fac = len(rho) - 2 # Number of Fatty Acid Composition Parameters
+    eps = sys.float_info.epsilon
+    CL, UD, PUD = None, None, None
+
+    if n_fac == 1:
+        # UD = F2/F1
+        UD = np.abs(rho[2] / (rho[1] + eps))
+    elif n_fac == 2:
+        # UD = F2/F1
+        # PUD = F3/F1
+        UD = np.abs(rho[2] / (rho[1] + eps))
+        PUD = np.abs(rho[3] / (rho[1] + eps))
+    elif n_fac == 3:
+        # UD = F2/F1
+        # PUD = F3/F1
+        # CL = F4/F1
+        UD = np.abs(rho[2] / (rho[1] + eps))
+        PUD = np.abs(rho[3] / (rho[1] + eps))
+        CL = np.abs(rho[4] / (rho[1] + eps))
+    else:
+        raise Exception('Unknown number of Fatty Acid Composition parameters: {}'.format(n_fac))
+
+    return CL, UD, PUD
+
+
+def get_fat(rho, alpha) -> np.array:
+    """Get total fat component (for Fatty Acid Composition; trivial otherwise)"""
+    fat = np.zeros(rho.shape[1:], dtype=complex)
+    for m in range(1, alpha.shape[0]):
+        fat += sum(alpha[m, 1:])*rho[m]
+    return fat
+
+
+def reconstruct_main(frame_coll: FrameCollection, algo_param: dict, model_param: dict, selected_slices:list[int]|None=None) -> dict:
+    """Perform fat/water separation and return prescribed output.
+    The output is a dict where keys are map names, and values are the numpy array images."""
+
+    if selected_slices is None:
+        print_dt('Start reconstruction')
+    else:
+        print_dt(f'Start reconstruction of slices {selected_slices}')
+
+    # Do the fat/water separation
+    rho, b0_map, r2_map = reconstruct(frame_coll, algo_param, model_param, selected_slices=selected_slices)
+    wat = rho[0]
+    fat = get_fat(rho, model_param['alpha'])
+
+    # Prepare prescribed output
+    output = {}
+    if 'wat' in algo_param['output']:
+        output['wat'] = np.abs(wat)
+    if 'fat' in algo_param['output']:
+        output['fat'] = np.abs(fat)
+    if 'phi' in algo_param['output']:
+        output['phi'] = np.angle(wat, deg=True) + 180
+    if 'ip' in algo_param['output']: # Calculate synthetic in-phase
+        output['ip'] = np.abs(wat + fat)
+    if 'op' in algo_param['output']: # Calculate synthetic opposed-phase
+        output['op'] = np.abs(wat - fat)
+    if 'ff' in algo_param['output']: # Calculate the fat fraction
+        if algo_param['magnitude_discrimination']:  # to avoid bias from noise
+            output['ff'] = 100 * np.real(fat / (wat + fat + sys.float_info.epsilon))
+        else:
+            output['ff'] = 100 * np.abs(fat)/(np.abs(wat) + np.abs(fat) + sys.float_info.epsilon)
+    if 'b0' in algo_param['output']:
+        output['b0'] = b0_map
+    if 'r2' in algo_param['output']:
+        output['r2'] = r2_map
+
+    # Do any Fatty Acid Composition in a second pass
+    if model_param['n_fac'] > 0:
+        print_dt('Start Fatty Acid Composition ')
+        rho = reconstruct(frame_coll, algo_param['pass2'], model_param['pass2'], b0_map, r2_map, selected_slices=selected_slices)[0]
+        CL, UD, PUD = get_fatty_acid_composition(rho)
+    
+        if 'CL' in algo_param['output']:
+            output['CL'] = CL
+        if 'UD' in algo_param['output']:
+            output['UD'] = UD
+        if 'PUD' in algo_param['output']:
+            output['PUD'] = PUD
+
+    return output
 
 def QPBO(D: np.array, Vx: np.array, Vy: np.array, Vz: np.array) -> np.array:
     graph = tq.QPBOFloat()
@@ -133,8 +220,7 @@ def get_higher_level(level: dict):
             for sz in [1, 2]:  
                 # at least one dimension must change and the size of all
                 # dimensions at lower level must permit any downscaling
-                if (sx*sy*sz > 1 and level['nx'] >= sx and
-                   level['ny'] >= sy and level['nz'] >= sz):
+                if (sx*sy*sz > 1 and level['nx'] >= sx and level['ny'] >= sy and level['nz'] >= sz):
                     if (level['nx'] == 1):
                         iso = isotropy_2d(level['dy']*sy, level['dz']*sz)
                     elif (level['ny'] == 1):
@@ -368,7 +454,7 @@ def reconstruct(frame_coll: FrameCollection, algo_param: dict, model_param: dict
         RAp.append(np.linalg.pinv(RA[r]))
 
     if algo_param['real_estimates']:
-        print('Real estimates')
+        print_dt('Real estimates')
         for b in range(algo_param['n_b0']):
             B[b] = realify(B[b])
             Bh[b] = realify(Bh[b])

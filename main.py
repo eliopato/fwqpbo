@@ -1,163 +1,19 @@
 #!/usr/bin/env python3
 
-import numpy as np
 import datetime
-import sys
 import optparse
 import config
-import fat_water_separation
-import dicom_processing
-from dicom_tools import get_slabs, print_dt
+import os
+import numpy as np
 
-
-def merged_output_slices(output_list: list) -> dict:
-    """Merge output for slices/slabs reconstructed separately
-    Return a dict with the numpy array for each image type (ff, water, etc)"""
-    merged_output = output_list[0]
-    for output in output_list[1:]:
-        for series_type in output:
-            merged_output[series_type] = np.concatenate((merged_output[series_type], output[series_type]))
-    return merged_output
-
-
-def get_fatty_acid_composition(rho: list) -> tuple[float, float, float]:
-    """calculate UD, UD and PUD or UD, PUD and CL dependant on the number of fatty acid components (length(rho) -2)"""
-    n_fac = len(rho) - 2 # Number of Fatty Acid Composition Parameters
-    eps = sys.float_info.epsilon
-    CL, UD, PUD = None, None, None
-
-    if n_fac == 1:
-        # UD = F2/F1
-        UD = np.abs(rho[2] / (rho[1] + eps))
-    elif n_fac == 2:
-        # UD = F2/F1
-        # PUD = F3/F1
-        UD = np.abs(rho[2] / (rho[1] + eps))
-        PUD = np.abs(rho[3] / (rho[1] + eps))
-    elif n_fac == 3:
-        # UD = F2/F1
-        # PUD = F3/F1
-        # CL = F4/F1
-        UD = np.abs(rho[2] / (rho[1] + eps))
-        PUD = np.abs(rho[3] / (rho[1] + eps))
-        CL = np.abs(rho[4] / (rho[1] + eps))
-    else:
-        raise Exception('Unknown number of Fatty Acid Composition parameters: {}'.format(n_fac))
-
-    return CL, UD, PUD
-
-
-def get_fat(rho, alpha) -> np.array:
-    """Get total fat component (for Fatty Acid Composition; trivial otherwise)"""
-    fat = np.zeros(rho.shape[1:], dtype=complex)
-    for m in range(1, alpha.shape[0]):
-        fat += sum(alpha[m, 1:])*rho[m]
-    return fat
-
-
-def reconstruct(frame_coll: dicom_processing.FrameCollection, algo_param: dict, model_param: dict, selected_slices:list[int]|None=None) -> dict:
-    """Perform fat/water separation and return prescribed output.
-    The output is a dict where keys are map names, and values are the numpy array images."""
-
-    if selected_slices is None:
-        print_dt('Start reconstruction')
-    else:
-        print_dt(f'Start reconstruction of slices {selected_slices}')
-
-    # Do the fat/water separation
-    rho, b0_map, r2_map = fat_water_separation.reconstruct(frame_coll, algo_param, model_param, selected_slices=selected_slices)
-    wat = rho[0]
-    fat = get_fat(rho, model_param['alpha'])
-
-    # Prepare prescribed output
-    output = {}
-    if 'wat' in algo_param['output']:
-        output['wat'] = np.abs(wat)
-    if 'fat' in algo_param['output']:
-        output['fat'] = np.abs(fat)
-    if 'phi' in algo_param['output']:
-        output['phi'] = np.angle(wat, deg=True) + 180
-    if 'ip' in algo_param['output']: # Calculate synthetic in-phase
-        output['ip'] = np.abs(wat + fat)
-    if 'op' in algo_param['output']: # Calculate synthetic opposed-phase
-        output['op'] = np.abs(wat - fat)
-    if 'ff' in algo_param['output']: # Calculate the fat fraction
-        if algo_param['magnitude_discrimination']:  # to avoid bias from noise
-            output['ff'] = 100 * np.real(fat / (wat + fat + sys.float_info.epsilon))
-        else:
-            output['ff'] = 100 * np.abs(fat)/(np.abs(wat) + np.abs(fat) + sys.float_info.epsilon)
-    if 'b0_map' in algo_param['output']:
-        output['b0_map'] = b0_map
-    if 'r2_map' in algo_param['output']:
-        output['r2_map'] = r2_map
-
-    # Do any Fatty Acid Composition in a second pass
-    if model_param['n_fac'] > 0:
-        print_dt('Start Fatty Acid Composition ')
-        rho = fat_water_separation.reconstruct(frame_coll, algo_param['pass2'], model_param['pass2'], b0_map, r2_map, selected_slices=selected_slices)[0]
-        CL, UD, PUD = get_fatty_acid_composition(rho)
-    
-        if 'CL' in algo_param['output']:
-            output['CL'] = CL
-        if 'UD' in algo_param['output']:
-            output['UD'] = UD
-        if 'PUD' in algo_param['output']:
-            output['PUD'] = PUD
-
-    return output
-
-
-def main(data_param_filepath: str, algo_param_filepath: str, model_param_filepath: str):
-    start_time = datetime.datetime.now()
-    print_dt('Reading config files')
-    data_param = config.read_configfile(data_param_filepath)
-    config.setup_data_params(data_param)
-    algo_param = config.read_configfile(algo_param_filepath)
-    model_param = config.read_configfile(model_param_filepath)
-
-    # setup data params and read input images
-    print_dt('Reading input images')
-    
-    frame_coll = dicom_processing.read_input_images(data_param)    
-    if 'slabs_size' in frame_coll.user_params:
-        frame_coll.user_params['slabs'] = get_slabs(frame_coll.slice_indexes, data_param['slabs_size'])
-
-    # setsup model and algo parameters
-    config.setup_model_params(model_param, data_param['clockwise_precession'], data_param['temperature'])
-    config.setup_algo_params(algo_param, frame_coll.n_echo, model_param['n_fac'])
-
-    print_dt(f'B0 = {round(frame_coll.b0, 2)}')
-    print_dt(f'N echoes = {frame_coll.n_echo} ({frame_coll.echo_times})')
-    print_dt(f't1/dt = {round(frame_coll.t1*1000, 2)}/{round(frame_coll.dt*1000, 2)} msec')
-    print_dt(f'nx,ny,nz = {frame_coll.nx}, {frame_coll.ny}, {frame_coll.n_slice_indexes}')
-    print_dt(f'dx,dy,dz = {round(frame_coll.dx, 2)}, {round(frame_coll.dy, 2)}, {round(frame_coll.dz, 2)}')
-
-    # Run fat/water processing and save output
-    
-    if not algo_param['use_3D'] or 'slabs' in frame_coll.user_params:
-        output = []
-        
-        if 'slabs' in frame_coll.user_params: 
-            for n_slab, (slices, _) in enumerate(frame_coll.user_params['slabs']):
-                print_dt(f'Processing slab {n_slab+1}/{len(frame_coll.user_params['slabs'])} (slices {slices[0]+1}-{slices[-1]+1})...')
-                output.append(reconstruct(frame_coll, algo_param, model_param, selected_slices=slices))
-        elif not algo_param['use_3D']:
-            for z_slice in frame_coll.slice_indexes:
-                print_dt(f'Processing slice {z_slice+1}/{frame_coll.n_slice_indexes}...')
-                output.append(reconstruct(frame_coll, algo_param, model_param, selected_slices=[z_slice]))
-        else:
-            raise Exception('Error: cant do slab processing if use_3D is set to False, please update the data_params.yml file')
-        output = merged_output_slices(output)
-        
-    elif algo_param['use_3D']:
-        output = reconstruct(frame_coll, algo_param, model_param)
-
-    dicom_processing.save(output, frame_coll)
-    print(f'Total run time: {datetime.datetime.now() - start_time}')
-        
-
+from fat_water_separation import reconstruct_main
+from dicom_processing import read_input_images, save
+from tools import get_slabs, print_dt, merged_output_slices, load_nifti_as_array
 
 if __name__ == '__main__':
+
+    start_time_main = datetime.datetime.now()
+        
     # Initiate command line parser
     p = optparse.OptionParser()
     p.add_option('--data_param_filepath', '-d', default='',  type='string', help='File path of data parameter configuration file')
@@ -167,4 +23,122 @@ if __name__ == '__main__':
     # Parse command line
     options, arguments = p.parse_args()
 
-    main(options.data_param_filepath, options.algo_param_filepath, options.model_param_filepath)
+    data_params = config.read_configfile(options.data_param_filepath)
+    algo_params = config.read_configfile(options.algo_param_filepath)
+    model_params = config.read_configfile(options.model_param_filepath)
+
+    data_defaults = data_params['default'] if 'default' in data_params else dict()
+    algo_defaults = algo_params['default'] if 'default' in algo_params else dict()
+    model_defaults = data_params['default'] if 'default' in algo_params else dict()
+    
+    config_stats = dict()
+    
+    for algo_configname in algo_params:
+        
+        config_stats[algo_configname] = dict()
+
+        for model_configname in model_params:
+            
+            config_stats[algo_configname][model_configname] = dict()
+
+            for data_configname in data_params:
+                
+                start_time = datetime.datetime.now()
+                print('--------------------------------------------------------------------------------------')
+                print_dt(f'Processing data {data_configname} with algo {algo_configname} and model {model_configname}')
+                
+                # set default params
+                algo_dict = config.set_default(algo_defaults, algo_params[algo_configname])
+                data_dict = config.set_default(data_defaults, data_params[data_configname])
+                model_dict = config.set_default(model_defaults, model_params[model_configname])
+
+                if 'dirs' not in data_dict and 'files' not in data_dict:
+                    print_dt('skip data config, no input files defined')
+                    continue
+
+                root_out_dir = data_dict['out_dir']
+                config_out_dir = f'{root_out_dir}/{data_configname}/{algo_configname}_{model_configname}/'
+                os.makedirs(config_out_dir, exist_ok=True)
+                data_dict['out_dir'] = config_out_dir
+
+                print_dt(f'Detecting valid files for data {data_configname}')
+                data_dict = config.detect_valid_files(data_dict)
+                if data_dict is None: 
+                    continue
+                
+                # setup data params and read input images
+                print_dt('Reading input images')                
+                frame_coll = read_input_images(data_dict)    
+                if 'slabs_size' in data_dict:
+                    frame_coll.user_params['slabs'] = get_slabs(frame_coll.slice_indexes, data_dict['slabs_size'])
+
+                # setup model and algo parameters
+                config.setup_model_params(model_dict, data_dict['clockwise_precession'], data_dict['temperature'])
+                config.setup_algo_params(algo_dict, frame_coll.n_echo, model_dict['n_fac'])
+
+                # don't run the same config if output files already exist and config is not set to rerun configs
+                missing_output = False
+                if not data_dict['update_existing_outputs']:
+                    for out_folder in algo_dict['output']:
+                        if not os.path.exists(f'{config_out_dir}/{out_folder}'):
+                            missing_output = True
+                            break
+                else:
+                    missing_output = True
+                
+                if missing_output:
+                    # save parameters to a file (same name as the config out dir minus /)
+                    with open(f'{config_out_dir.rstrip("/")}_params.txt', mode='w') as f:
+                        f.write(str({'data': data_dict, 'algo': algo_dict, 'model': model_dict}))
+
+                    print_dt(f'B0 = {round(frame_coll.b0, 2)}')
+                    print_dt(f'N echoes = {frame_coll.n_echo} ({frame_coll.echo_times})')
+                    print_dt(f't1/dt = {round(frame_coll.t1*1000, 2)}/{round(frame_coll.dt*1000, 2)} msec')
+                    print_dt(f'nx,ny,nz = {frame_coll.nx}, {frame_coll.ny}, {frame_coll.n_slice_indexes}')
+                    print_dt(f'dx,dy,dz = {round(frame_coll.dx, 2)}, {round(frame_coll.dy, 2)}, {round(frame_coll.dz, 2)}')
+
+                    # Run fat/water processing and save output
+                    
+                    if not algo_dict['use_3D'] or 'slabs' in frame_coll.user_params:
+                        output = []
+                        
+                        if 'slabs' in frame_coll.user_params: 
+                            for n_slab, (slices, _) in enumerate(frame_coll.user_params['slabs']):
+                                print_dt(f'Processing slab {n_slab+1}/{len(frame_coll.user_params['slabs'])} (slices {slices[0]+1}-{slices[-1]+1})...')
+                                output.append(reconstruct_main(frame_coll, algo_dict, model_dict, selected_slices=slices))
+                        elif not algo_dict['use_3D']:
+                            for z_slice in range(frame_coll.n_slice_indexes):
+                                print_dt(f'Processing slice {z_slice+1}/{frame_coll.n_slice_indexes}...')
+                                output.append(reconstruct_main(frame_coll, algo_dict, model_dict, selected_slices=[z_slice]))
+                        else:
+                            raise Exception('Error: cant do slab processing if use_3D is set to False, please update the data_params.yml file')
+                        output = merged_output_slices(output)
+                        
+                    elif algo_dict['use_3D']:
+                        output = reconstruct_main(frame_coll, algo_dict, model_dict)
+
+                    save(output, frame_coll)
+
+                if frame_coll.seg is not None:
+                    print_dt('Computing stats with expected labels per segmented region')
+                    current_stats_dict = dict()
+                    for map_type in frame_coll.seg['expected_values']:
+                        map_filepath = f"{frame_coll.user_params['out_dir']}/{map_type}.nii.gz"
+                        if not os.path.exists(map_filepath):
+                            print_dt(f'Expected output map file for {map_type} doesnt exist in {map_filepath}')
+                            continue
+                        map_vol_map = load_nifti_as_array(map_filepath)
+                        seg_vol_map = frame_coll.seg['vol'].copy()
+                        current_stats_dict[map_type] = dict()
+                        for (label, expected_value) in frame_coll.seg['expected_values'][map_type].items():
+                            roi = map_vol_map[seg_vol_map == label]
+                            current_stats_dict[map_type][str(expected_value)] = {'mean': np.nan if len(roi) == 0 else roi.mean(),
+                                                                                 'std': np.nan if len(roi) == 0 else roi.std()}
+                    config_stats[algo_configname][model_configname][data_configname] = current_stats_dict
+                
+                with open(f'{root_out_dir}/stats.txt', mode='w') as f:
+                    f.write(str(config_stats))
+
+                print(f'Config run time: {datetime.datetime.now() - start_time}')
+                
+    print(f'Full script run time: {datetime.datetime.now() - start_time_main}')

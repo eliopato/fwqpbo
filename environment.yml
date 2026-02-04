@@ -3,6 +3,8 @@ channels:
   - defaults
 dependencies:
   - python=3
+  - nibabel
+  - dcm2niix
   - numpy
   - pip
   - pydicom=1.1

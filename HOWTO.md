@@ -1,12 +1,48 @@
 # QUICKSTART
 
-Install dependencies by running `pip install -r requirements.txt` from a terminal located in the fwqpbo folder.
+Install dependencies by running `conda env create -f environment.yml` from a terminal located in the fwqpbo folder, with Conda installed.
 
 Once the required packages are installed, update the parameter files as needed and run the following command:
 ```
-./main.py -d params/data.yml -a params/algo_3D.yml -m params/model.yml
+./main.py -d params/data_batch.yml -a params/algo_batch.yml -m params/model_batch.yml
 ```
 
+Each parameter file allows for testing several configurations. The format for defining different configurations is:
+```
+default:
+    param1: default_value1
+    param2: default_value2
+    param3: default_value3
+
+config_name1:
+    param1: value1
+
+config_name2:
+    param2: value2
+    param3: value3
+```
+
+If a configuration named "default" exists, it will be used to set parameters that are not redefined in the other configurations (hence overiding the default paramers defined in the code). The default configuration is also ran as a configuration itself.
+
+The config names are used to create output folders. They can contain slashes to organize outputs in subfolders, for example a data parameter file like 
+```
+default:
+    out_dir: /home/user/output/FWQPBO/
+
+3t/brain:
+    dirs: [/home/user/input/brain/phase, /home/user/input/brain/magnitude]
+    slice_list: [12, 13]
+
+3t/liver:
+    dirs: [/home/user/input/liver/phase, /home/user/input/liver/magnitude]
+    slice_list: [24, 25]
+```
+will create the following subfolders:
+```
+/home/user/output/FWQPBO/default/
+/home/user/output/FWQPBO/3t/brain/
+/home/user/output/FWQPBO/3t/liver/
+```
 # DATA PARAMETERS
 
 Parameters used to select the input data (FOV, echoes, slices, etc).
@@ -17,9 +53,11 @@ Parameters used to select the input data (FOV, echoes, slices, etc).
 
 `out_dir`: directory to store output files in. Will be created if it doesn't exist.
 
+`update_existing_outputs`: set to True to run all configs and overide any existing output, or False to skip configs that already have all the existing outputs.
+
 ## Optional parameters
 
-`rescale`: rescale the value of the pixels in the input images. Default: 1. Type: float.
+`rescale`: rescale the value of the pixels in the input images. Default: 1 (no rescaling). Type: float.
 
 `slice_list`: if set, will only process the slices specified in the list. Slice indexes start from 0. Default: all slices. Type: list of int.
 
@@ -35,18 +73,34 @@ Parameters used to select the input data (FOV, echoes, slices, etc).
 
 `offres_center`: Off-resonnance center. Default: 0. Type: int.
 
+`seg` : subcategory to define a segmentation file and expected values to compare output maps with.
+- `file`: path to the segmentation file, must be a nifti file
+- `expected_values`: subcategory holding for each map type (e.g. ff, r2_map, etc) the expected values of each label
+    - `[map name]`
+        - `label1: expected value1`
+        - `label2: expected value2`
+        - ...
+
 ## Example file content
 ```
-dirs: [/home/user/path/to/dicom/folder/phase/, /home/user/path/to/folder/magnitude/]
-out_dir: /home/user/path/to/output/folder/
-rescale: 0.0001
-slice_list: [0, 1, 2, 3]
-echoes: [0, 1, 2]
-temperature: 37
-crop_fov: [64, 128, 64, 92] 
-slabs_size: 2
-clockwise_precession: False
-offres_center: 0.
+phantom: 
+    dirs: [/home/user/path/to/dicom/folder/phase/, /home/user/path/to/folder/magnitude/]
+    out_dir: /home/user/path/to/output/folder/
+    seg: 
+      file: /home/user/path/to/segmentation.nii.gz
+      expected_values:
+        ff:
+          1: 0
+          2: 25
+          3: 100
+    rescale: 0.0001
+    slice_list: [0, 1, 2, 3]
+    echoes: [0, 1, 2]
+    temperature: 37
+    crop_fov: [64, 128, 64, 92] 
+    slabs_size: 2
+    clockwise_precession: False
+    offres_center: 0.
 ```
 
 
@@ -62,21 +116,22 @@ All values are optional.
 
 `rel_amps`: Relative amplitudes at the fat chemical shifts listed in `fat_cs`, normalized so that their sum=1. Only used if `n_fac` = 0. Default: all peaks have the same amplitude. Type: list of floats.
 
-`n_fac`: Number of Fatty Acid Composition parameters. Possible values: 0, 1, 2, 3. Default: 0. Type: int.
+`n_fac`: Number of fatty acid composition parameters. Possible values: 0, 1, 2, 3. Default: 0. Type: int.
 
-`CL`: FAC chain length. Only used if n_fac > 0. Default: 17.4. Type: float.
+`CL`: Fatty acid carbon chain length. Only used if n_fac > 0. Default: 17.4. Type: float.
 
-`UD`: FAC unsaturation degree. Only used if n_fac > 0.Default: 0.2. Type: float.
+`UD`: Fatty acid carbon unsaturation degree. Only used if n_fac > 0.Default: 2.6. Type: float.
 
-`P2U`: FAC polyunsaturation degree per unsaturation degree (PUD per UD). Only used if n_fac > 0. Default: 2.6. Type: float.
+`P2U`: Fatty acid carbon polyunsaturation degree per unsaturation degree (PUD per UD). Only used if n_fac > 0. Default: 0.2. Type: float.
 
 
 ## Example file content:
 ```
-fat_cs: [5.3, 4.31, 2.76, 2.1, 1.3, 0.9]
-rel_amps: [0.048, 0.039, 0.004, 0.128, 0.693, 0.087]
-wat_cs: 4.7
-n_fac: 0
+ISMRM2012:
+  fat_cs:   [ 5.3,    4.31,   2.76,   2.1,    1.3,    0.9]
+  rel_amps: [ 0.048,  0.039,  0.004,  0.128,  0.693,  0.087]
+  wat_cs: 4.7
+  n_fac: 0
 ```
 
 # ALGORITHM PARAMETERS
@@ -106,14 +161,15 @@ All values are optional.
 ## Example file content:
 
 ```
-n_r2: 145
-r2_max: 144.0
-r2_cand: [40.]
-mu: 0.1
-n_b0: 100
-n_icm_iter: 10
-graphcut: True
-multiscale: True
-use_3D: False
-magnitude_discrimination: False
+default:
+  n_r2: 145
+  r2_max: 144.0
+  r2_cand: [40.]
+  mu: 0.1
+  n_b0: 100
+  n_icm_iter: 10
+  graphcut: True
+  multiscale: True
+  use_3D: True
+  magnitude_discrimination: False
 ```

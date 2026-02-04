@@ -1,0 +1,20 @@
+default:
+  temperature: 32
+  clockwise_precession: False
+  offres_center: 0.
+  out_dir: /home/user/path/to/output/folder/
+
+test1:
+  dirs: [/home/user/path/to/dicom/folder/phase/, /home/user/path/to/folder/magnitude/]
+  seg: 
+    file: /home/user/path/to/segmentation.nii.gz
+    expected_values:
+      ff:
+        1: 0
+        2: 25
+        3: 100
+  # rescale: 0.0001 
+  # slice_list: [0, 1, 2, 3]
+  # crop_fov: [0, 0, 0, 0] # [x0, x1, y0, y1]
+  # echoes: [0, 1, 2]
+  # slabs_size: 2

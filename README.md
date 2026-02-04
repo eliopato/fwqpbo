@@ -8,13 +8,13 @@ Input data has to be in DICOM format (standard or enhanced).
 
 INSTALLATION
 -------------------------------------------------------------------------------
-Install dependencies by running `pip install -r requirements.txt` from a terminal located in the fwqpbo folder.
+Install dependencies by running `conda env create -f environment.yml` from a terminal located in the fwqpbo folder, with Conda installed.
 
 HOW TO USE
 -------------------------------------------------------------------------------
 Once the required packages are installed, update the parameter files as needed and run the following command:
 ```
-./main.py -d params/data.yml -a params/algo_3D.yml -m params/model.yml
+./main.py -d params/data_batch.yml -a params/algo_batch.yml -m params/model_batch.yml
 ```
 
 Check [HOWTO.md](HOWTO.md) for more info about parameter files.
@@ -22,6 +22,8 @@ Check [HOWTO.md](HOWTO.md) for more info about parameter files.
 FORK UPDATES
 -------------------------------------------------------------------------------
 The main differences between this project and the original one (available at [github/bertglun/fwqpbo](https://github.com/bretglun/fwqpbo)) are:
+- added batch processing to allow testing different configs (data, algo, model) in one run
+- output stats to compare map outputs with expected values
 - added support of Enhanced DICOM files
 - PEP8 formatting + on its way to have sphinx compatible comments
 - added compatibility with latest pydicom version (3.0.1)

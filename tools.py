@@ -1,6 +1,7 @@
 import pydicom
 import datetime
 import numpy as np
+import nibabel as nib
 
 def print_dt(message: str) -> None:
     """add the hour/minute seconds before printing the message"""
@@ -10,7 +11,6 @@ def print_dt(message: str) -> None:
 # don't chang the order of the attributes as it would affect the whole processing
 req_attributes = ['Image Type', 
                  'Echo Time', 
-                 'Slice Location',
                  'Imaging Frequency', 
                  'Columns', 
                  'Rows',
@@ -31,7 +31,6 @@ tag_dict = {
     'Study Instance UID': 0x0020000D,
     'Series Instance UID': 0x0020000E,
     'Series Number': 0x00200011,
-    'Slice Location': 0x00201041,
     'Image Position Patient': 0x00200032,
     'Rows': 0x00280010,
     'Columns': 0x00280011,
@@ -46,7 +45,7 @@ tag_dict = {
     'Rescale Type': 0x00281054,
     'Number of frames': 0x00280008,
     'Frame sequence': 0x52009230,  # Per-frame Functional Groups Sequence
-    'Frame Number': 0x00081160}  # slice number
+    }  
 
 
 def get_tag_value(ds: pydicom.Dataset, key: str, frame=None):
@@ -64,7 +63,7 @@ def get_tag_value(ds: pydicom.Dataset, key: str, frame=None):
         return val
     
     # multiframe images (enhanced dicom)
-    if frame is not None:
+    if frame is not None and tag_dict['Frame sequence'] in ds:
 
         frame_ds = ds[tag_dict['Frame sequence']].value[frame]
 
@@ -85,8 +84,8 @@ def get_tag_value(ds: pydicom.Dataset, key: str, frame=None):
                 if t in type_list:
                     return t
         
-        if key == 'Slice Location':
-            return frame_ds.PlanePositionSequence[0].ImagePositionPatient[2]
+        if key == 'Image Position Patient':
+            return frame_ds.PlanePositionSequence[0].ImagePositionPatient
 
         if key == 'Imaging Frequency':
             frame_ds = ds.SharedFunctionalGroupsSequence[0]
@@ -197,7 +196,7 @@ def set_tag_value(ds: pydicom.Dataset, key: str, val, frame=None, VR=None) -> bo
                 ds[key_id].VR = VR
             return True
         
-        if frame is not None:            
+        if frame is not None and tag_dict['Frame sequence'] in ds:            
             frame_ds = ds[tag_dict['Frame sequence']].value[frame]
             
             # Philips(?) private tag containing frame tags
@@ -212,8 +211,6 @@ def set_tag_value(ds: pydicom.Dataset, key: str, val, frame=None, VR=None) -> bo
                 frame_ds.MREchoSequence[0].EffectiveEchoTime = val
             elif key == 'Image Type':
                 frame_ds.MRImageFrameTypeSequence[0].FrameType[2] = val
-            elif key == 'Slice Location':
-                frame_ds.PlanePositionSequence[0].ImagePositionPatient[2] = val
             elif key == 'Imaging Frequency':
                 frame_ds = ds.SharedFunctionalGroupsSequence[0]
                 frame_ds.MRImagingModifierSequence[0].TransmitterFrequency = val 
@@ -241,7 +238,7 @@ def set_tag_value(ds: pydicom.Dataset, key: str, val, frame=None, VR=None) -> bo
         
         first_level_keys = ['SOP Instance UID', 'Series Instance UID', 'Protocol Name',
                             'Series Description', 'Smallest Pixel Value', 'Largest Pixel Value']
-        if frame is None or key in first_level_keys:
+        if frame is None or tag_dict['Frame sequence'] not in ds or key in first_level_keys:
             ds.add_new(key_id, VR, val)
             return True
         else:
@@ -257,8 +254,6 @@ def set_tag_value(ds: pydicom.Dataset, key: str, val, frame=None, VR=None) -> bo
             # elif key == 'Image Type':
             #     frame_ds = frame_ds.MRImageFrameTypeSequence[0]
             #     frame_ds.add_new('FrameType', VR, val)
-            # elif key == 'Slice Location':
-            #     frame_ds.PlanePositionSequence[0].ImagePositionPatient[2] = val
             # elif key == 'Imaging Frequency':
             #     frame_ds = ds.SharedFunctionalGroupsSequence[0]
             #     frame_ds.MRImagingModifierSequence[0].TransmitterFrequency = val 
@@ -297,3 +292,18 @@ def get_slabs(slice_list: list[int], slabs_size: int):
             slices.append(slice)
     slabs.append((slices, pos))
     return slabs
+
+
+def merged_output_slices(output_list: list) -> dict:
+    """Merge output for slices/slabs reconstructed separately
+    Return a dict with the numpy array for each image type (ff, water, etc)"""
+    merged_output = output_list[0]
+    for output in output_list[1:]:
+        for series_type in output:
+            merged_output[series_type] = np.concatenate((merged_output[series_type], output[series_type]))
+    return merged_output
+
+def load_nifti_as_array(filepath: str) -> np.ndarray | None:
+    """Reads a nifti file as an array in RAS orientation """
+    nifti_file = nib.load(filepath)
+    return nib.as_closest_canonical(nifti_file).get_fdata()
